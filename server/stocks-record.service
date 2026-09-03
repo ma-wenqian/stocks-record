@@ -1,0 +1,46 @@
+[Unit]
+Description=Stocks Record (HK equities ledger)
+Documentation=https://github.com/ma-wenqian/stocks-record
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# DynamicUser：systemd 临时分配 uid，只有 StateDirectory 可写。
+# 不上 docker —— 这东西零依赖、常驻 28MB，多一层 daemon 不划算
+DynamicUser=yes
+StateDirectory=stocks-record
+Environment=DB_PATH=/var/lib/stocks-record/stocks.sqlite3
+Environment=HOST=127.0.0.1
+Environment=PORT=9310
+Environment=NODE_ENV=production
+# 「退出」按钮指向 IdP 的登出地址；不设就不显示这个按钮
+#Environment=LOGOUT_URL=https://auth.example.com/logout
+WorkingDirectory=/opt/stocks-record
+ExecStart=/usr/bin/node /opt/stocks-record/server/app.js
+Restart=on-failure
+RestartSec=3
+
+# ⚠️ 只绑 127.0.0.1（见 app.js 顶部注释）：本进程无条件信任 Remote-User 头，
+#    暴露到公网等于把管理员身份送人。ufw 也不要放行 9310。
+# 下面这些是常规收紧，和上面那条不是一回事。
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=no
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# 这台内存紧，给它一个上限，别让它把 Authelia 挤掉
+MemoryMax=200M
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "stocks-record",
+  "main": "src/index.js",
+  "compatibility_date": "2025-04-01",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "stocks-record",
+      // 部署前替换：运行 npx wrangler d1 create stocks-record，把输出的 database_id 填到这里
+      "database_id": "b7c0f916-33cd-4401-be7c-569cfac054fa"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1115">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="港股记录">
+<title>港股买卖记录</title>
+<link rel="stylesheet" href="/style.css">
+
+<!-- 加到主屏幕的图标。
+     ⚠️ 必须是 PNG —— iOS 的 apple-touch-icon 不认 SVG，
+        所以之前那个 emoji 的 data-URI favicon 加到桌面是空白的。
+     ⚠️ /icons/ 和 manifest 在 Authelia 里是 bypass 的：
+        清单和图标的请求不带 cookie，不放行的话会被 302 到登录页、图标取不到。 -->
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
+</head>
+<body>
+
+<!-- ── 主界面 ─────────────────────────────────────────── -->
+<div id="app" hidden>
+  <header class="topbar">
+    <div class="topbar-title">港股买卖记录</div>
+    <div class="topbar-right">
+      <span class="muted" id="who"></span>
+      <!-- 服务端启动时把 __LOGOUT_URL__ 换成 LOGOUT_URL 环境变量；没设就整个隐藏 -->
+      <a class="btn ghost small" id="logout" href="__LOGOUT_URL__" hidden>退出</a>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="board">看板</button>
+    <button class="tab" data-tab="holdings">持仓</button>
+    <button class="tab" data-tab="trades">流水</button>
+  </nav>
+
+  <main>
+    <!-- 看板 -->
+    <section class="panel active" data-panel="board">
+      <div class="hero">
+        <div class="hero-label">总盈亏（已实现 + 浮动）</div>
+        <div class="hero-value" id="k-total">—</div>
+        <div class="hero-sub" id="k-total-pct">—</div>
+      </div>
+
+      <div class="kpi-grid">
+        <div class="kpi">
+          <div class="kpi-label">持仓市值</div>
+          <div class="kpi-value" id="k-mv">—</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">持仓成本</div>
+          <div class="kpi-value" id="k-cost">—</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">浮动盈亏</div>
+          <div class="kpi-value" id="k-unreal">—</div>
+          <div class="kpi-sub" id="k-unreal-pct"></div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">已实现盈亏</div>
+          <div class="kpi-value" id="k-real">—</div>
+          <div class="kpi-sub" id="k-real-sub"></div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">累计投入</div>
+          <div class="kpi-value" id="k-buyin">—</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">累计费用</div>
+          <div class="kpi-value" id="k-fees">—</div>
+        </div>
+      </div>
+
+      <p class="notice" id="quote-warning" hidden></p>
+
+      <h2 class="section-title">持仓分布</h2>
+      <div id="allocation" class="allocation"></div>
+
+      <h2 class="section-title">已清仓</h2>
+      <div id="closed-list" class="list"></div>
+    </section>
+
+    <!-- 持仓 -->
+    <section class="panel" data-panel="holdings">
+      <p class="hint">填入现价即可算出市值和浮动盈亏，改完自动保存。这是你自己的账本，别人看不到。</p>
+      <div id="holdings-list" class="list"></div>
+    </section>
+
+    <!-- 流水 -->
+    <section class="panel" data-panel="trades">
+      <div class="filter-row">
+        <input id="trade-filter" class="filter" placeholder="按代码或名称筛选…" autocapitalize="off">
+      </div>
+      <div id="trades-list" class="list"></div>
+    </section>
+  </main>
+
+  <button class="fab" id="add-trade" aria-label="新增交易">＋</button>
+</div>
+
+<!-- ── 新增 / 编辑交易 ────────────────────────────────── -->
+<div class="sheet-backdrop" id="sheet" hidden>
+  <form class="sheet" id="trade-form">
+    <div class="sheet-head">
+      <button type="button" class="btn ghost small" id="sheet-cancel">取消</button>
+      <strong id="sheet-title">新增交易</strong>
+      <button type="submit" class="btn primary small" id="sheet-save">保存</button>
+    </div>
+
+    <div class="side-toggle">
+      <label><input type="radio" name="side" value="BUY" checked><span class="buy">买入</span></label>
+      <label><input type="radio" name="side" value="SELL"><span class="sell">卖出</span></label>
+    </div>
+
+    <div class="field-grid">
+      <label class="span2"><span class="lbl">股票代码 <span class="opt">代码或名称都行</span></span>
+        <input name="symbol" id="f-symbol" list="symbol-options" placeholder="如 00700、小米、中车" required
+               autocapitalize="off" autocorrect="off" autocomplete="off">
+        <datalist id="symbol-options"></datalist>
+        <small class="field-hint" id="symbol-hint"></small>
+      </label>
+      <label class="span2"><span class="lbl">名称 <span class="opt">选填</span></span>
+        <input name="name" id="f-name" placeholder="如 腾讯控股">
+      </label>
+      <label class="span2"><span class="lbl">交易日期</span>
+        <input name="trade_date" id="f-date" type="date" required>
+      </label>
+      <label><span class="lbl">单价 (HKD)</span>
+        <input name="price" id="f-price" type="number" step="0.001" min="0" inputmode="decimal" required>
+      </label>
+      <label><span class="lbl">数量 (股)</span>
+        <input name="qty" id="f-qty" type="number" step="1" min="0" inputmode="decimal" required>
+      </label>
+      <label class="span2"><span class="lbl">费用合计 <span class="opt">佣金+印花税等，选填</span></span>
+        <input name="fee" id="f-fee" type="number" step="0.01" min="0" inputmode="decimal" placeholder="0">
+      </label>
+      <label class="span2"><span class="lbl">备注 <span class="opt">选填</span></span>
+        <input name="note" id="f-note" maxlength="200">
+      </label>
+    </div>
+
+    <div class="total-preview" id="total-preview">总价 —</div>
+    <p class="error" id="form-error" hidden></p>
+    <button type="button" class="btn danger block" id="sheet-delete" hidden>删除这条记录</button>
+  </form>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script type="module" src="/app.js"></script>
+</body>
+</html>

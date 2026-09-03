@@ -1,0 +1,1743 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1115">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="港股记录">
+<title>港股买卖记录 · 在线演示</title>
+<meta name="description" content="港股买卖流水与盈亏看板。移动加权平均成本法，演示数据存在你自己的浏览器里。">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<style>
+/* 港股买卖记录 · 样式
+   配色：红涨绿跌（跟内地/港股看盘习惯一致） */
+
+:root {
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --surface-2: #fafbfc;
+  --border: #e3e6ea;
+  --text: #14171c;
+  --muted: #6b7280;
+  --accent: #2b6cff;
+  --up: #d92b3c;
+  --down: #169b6a;
+  --flat: #6b7280;
+  --danger: #d92b3c;
+  --radius: 14px;
+  --shadow: 0 1px 2px rgba(16, 20, 28, .06), 0 6px 20px rgba(16, 20, 28, .05);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1115;
+    --surface: #171a20;
+    --surface-2: #1d2128;
+    --border: #2a2f38;
+    --text: #e8eaed;
+    --muted: #8b93a1;
+    --accent: #5b8cff;
+    --up: #f5555f;
+    --down: #2dc48d;
+    --flat: #8b93a1;
+    --danger: #f5555f;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .25);
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+h1, h2 { margin: 0; font-weight: 650; }
+.muted { color: var(--muted); }
+.opt { color: var(--muted); font-weight: 400; font-size: 12px; }
+.lbl { display: block; } /* 标签文字和「选填」提示留在同一行 */
+[hidden] { display: none !important; }
+
+/* 数字统一用等宽，对齐好看 */
+.num, .kpi-value, .hero-value, .hero-sub, .kpi-sub, .total-preview,
+.pos-price input, .row-figure, .row-sub, .amount {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* ── 登录 ─────────────────────────────────────── */
+.login {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+.login-card {
+  width: min(360px, 100%);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+  padding: 28px 24px;
+  display: grid;
+  gap: 14px;
+}
+.login-card h1 { font-size: 20px; }
+.login-card > .muted { margin: -10px 0 4px; font-size: 13px; }
+
+/* ── 表单元素 ─────────────────────────────────── */
+label {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 500;
+}
+input[type="text"], input[type="password"], input[type="number"],
+input[type="date"], input:not([type]) {
+  width: 100%;
+  padding: 11px 12px;
+  font: inherit;
+  font-size: 16px; /* iOS 上 <16px 会触发缩放 */
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  outline: none;
+  -webkit-appearance: none;
+}
+input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.btn {
+  font: inherit;
+  font-weight: 600;
+  padding: 11px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+  transition: filter .12s, background .12s;
+}
+.btn:active { filter: brightness(.94); }
+.btn.primary { background: var(--accent); border-color: transparent; color: #fff; }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--muted); }
+.btn.danger { background: transparent; border-color: var(--border); color: var(--danger); }
+.btn.small { padding: 6px 11px; font-size: 13px; border-radius: 8px; }
+.btn.block { width: 100%; }
+.btn:disabled { opacity: .55; cursor: default; }
+
+.error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 13px;
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+/* ── 顶栏 / 标签页 ────────────────────────────── */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px calc(12px + env(safe-area-inset-top)) 16px;
+  padding-top: calc(12px + env(safe-area-inset-top));
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: saturate(180%) blur(12px);
+  border-bottom: 1px solid var(--border);
+}
+.topbar-title { font-weight: 650; }
+.topbar-right { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+
+.tabs {
+  position: sticky;
+  top: 53px;
+  z-index: 19;
+  display: flex;
+  gap: 4px;
+  padding: 8px 12px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+.tab {
+  flex: 1;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 8px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.tab.active { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+
+main { max-width: 760px; margin: 0 auto; padding: 16px 16px 96px; }
+.panel { display: none; }
+.panel.active { display: block; }
+
+.section-title {
+  font-size: 13px;
+  color: var(--muted);
+  text-transform: none;
+  margin: 26px 0 10px;
+  letter-spacing: .02em;
+}
+.hint {
+  margin: 0 0 14px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.notice {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  font-size: 13px;
+  border-radius: 10px;
+  color: var(--text);
+  background: color-mix(in srgb, #f0a020 16%, var(--surface));
+  border: 1px solid color-mix(in srgb, #f0a020 32%, transparent);
+}
+
+/* ── 看板 ─────────────────────────────────────── */
+.hero {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+  padding: 22px 20px;
+  text-align: center;
+}
+.hero-label { font-size: 13px; color: var(--muted); }
+.hero-value { font-size: 34px; font-weight: 680; letter-spacing: -.02em; margin: 6px 0 2px; }
+.hero-sub { font-size: 14px; font-weight: 600; }
+
+.kpi-grid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+@media (min-width: 620px) { .kpi-grid { grid-template-columns: repeat(3, 1fr); } }
+.kpi {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 13px 14px;
+}
+.kpi-label { font-size: 12px; color: var(--muted); }
+.kpi-value { font-size: 19px; font-weight: 640; margin-top: 3px; letter-spacing: -.01em; }
+.kpi-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+.allocation { display: grid; gap: 8px; }
+.alloc-row { display: grid; gap: 5px; }
+.alloc-head { display: flex; justify-content: space-between; font-size: 13px; }
+.alloc-bar { height: 7px; border-radius: 99px; background: var(--border); overflow: hidden; }
+.alloc-fill { height: 100%; border-radius: 99px; background: var(--accent); }
+
+/* ── 列表卡片 ─────────────────────────────────── */
+.list { display: grid; gap: 10px; }
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  box-shadow: var(--shadow);
+}
+.card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+.sym { font-weight: 660; }
+.sym .code { color: var(--muted); font-weight: 500; font-size: 12px; margin-left: 6px; }
+.row-figure { font-weight: 640; }
+.row-sub { font-size: 12px; color: var(--muted); }
+
+.stat-row {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.stat { min-width: 0; }
+.stat dt { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.stat dd {
+  margin: 2px 0 0;
+  font-size: 14px;
+  letter-spacing: -.02em;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pos-price {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+.pos-price span { font-size: 13px; color: var(--muted); white-space: nowrap; }
+.pos-price input { max-width: 130px; padding: 8px 10px; }
+.pos-price .stamp { font-size: 11px; margin-left: auto; text-align: right; }
+
+/* ── 流水 ─────────────────────────────────────── */
+.filter-row { margin-bottom: 12px; }
+.filter { padding: 10px 12px; }
+
+.trade-day {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 16px 0 6px;
+  font-variant-numeric: tabular-nums;
+}
+.trade-day:first-child { margin-top: 0; }
+
+.trade {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+}
+.trade:active { filter: brightness(.97); }
+.pill {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+}
+.pill.buy { background: var(--up); }
+.pill.sell { background: var(--down); }
+.trade-main { flex: 1; min-width: 0; }
+.trade-main .line1 { display: flex; gap: 6px; align-items: baseline; }
+.trade-main .line2 { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.trade-right { text-align: right; flex: none; }
+.amount { font-weight: 640; }
+
+.empty {
+  text-align: center;
+  color: var(--muted);
+  font-size: 14px;
+  padding: 36px 16px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+}
+
+/* ── 涨跌色 ───────────────────────────────────── */
+.up { color: var(--up); }
+.down { color: var(--down); }
+.flat { color: var(--flat); }
+
+/* ── 悬浮按钮 ─────────────────────────────────── */
+.fab {
+  position: fixed;
+  right: 18px;
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  z-index: 30;
+  width: 56px;
+  height: 56px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.fab:active { filter: brightness(.92); }
+
+/* ── 底部抽屉表单 ─────────────────────────────── */
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgba(8, 10, 14, .45);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  overflow-y: auto;
+}
+@media (min-width: 620px) { .sheet-backdrop { align-items: center; } }
+
+.sheet {
+  width: min(560px, 100%);
+  background: var(--surface);
+  border-radius: 20px 20px 0 0;
+  padding: 14px 16px calc(20px + env(safe-area-inset-bottom));
+  display: grid;
+  gap: 14px;
+  animation: rise .18s ease-out;
+  max-height: 94dvh;
+  overflow-y: auto;
+}
+@media (min-width: 620px) { .sheet { border-radius: 20px; } }
+@keyframes rise { from { transform: translateY(16px); opacity: .6; } }
+
+.sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  position: sticky;
+  top: -14px;
+  background: var(--surface);
+  padding: 6px 0;
+  margin: -6px 0 0;
+}
+
+.side-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 4px;
+}
+.side-toggle label { cursor: pointer; }
+.side-toggle input { position: absolute; opacity: 0; pointer-events: none; }
+.side-toggle span {
+  display: block;
+  text-align: center;
+  padding: 9px;
+  border-radius: 9px;
+  font-weight: 640;
+  font-size: 15px;
+  color: var(--muted);
+}
+.side-toggle input:checked + .buy { background: var(--up); color: #fff; }
+.side-toggle input:checked + .sell { background: var(--down); color: #fff; }
+
+.field-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.field-grid .span2 { grid-column: 1 / -1; }
+
+.field-hint {
+  font-size: 12px;
+  color: var(--muted);
+  min-height: 1.2em;
+}
+.field-hint.ok { color: var(--accent); }
+.field-hint.bad { color: var(--danger); }
+
+.total-preview {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 14px;
+  color: var(--muted);
+}
+.total-preview strong { color: var(--text); font-size: 17px; font-weight: 660; }
+
+/* ── 轻提示 ───────────────────────────────────── */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(88px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 60;
+  max-width: min(460px, calc(100vw - 32px));
+  padding: 11px 16px;
+  border-radius: 12px;
+  background: #22262e;
+  color: #fff;
+  font-size: 14px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .3);
+  animation: rise .16s ease-out;
+}
+.toast.bad { background: var(--danger); }
+
+
+/* 演示页专属：顶部提示条 */
+.demo-bar {
+  padding: 10px 16px;
+  font-size: 13px;
+  text-align: center;
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  border-bottom: 1px solid var(--border);
+}
+.demo-bar b { color: var(--accent); }
+.demo-bar button {
+  font: inherit;
+  font-size: 12px;
+  margin-left: 8px;
+  padding: 3px 9px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+</style>
+</head>
+<body>
+
+<div class="demo-bar">
+  这是<b>在线演示</b>，数据全是编的，只存在你自己的浏览器里，随便改。
+  <button id="demo-reset">重置演示数据</button>
+</div>
+
+<!-- ── 主界面 ─────────────────────────────────────────── -->
+<div id="app" hidden>
+  <header class="topbar">
+    <div class="topbar-title">港股买卖记录</div>
+    <div class="topbar-right">
+      <span class="muted" id="who"></span>
+      <!-- 服务端启动时把 __LOGOUT_URL__ 换成 LOGOUT_URL 环境变量；没设就整个隐藏 -->
+      <a class="btn ghost small" id="logout" href="__LOGOUT_URL__" hidden>退出</a>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="board">看板</button>
+    <button class="tab" data-tab="holdings">持仓</button>
+    <button class="tab" data-tab="trades">流水</button>
+  </nav>
+
+  <main>
+    <!-- 看板 -->
+    <section class="panel active" data-panel="board">
+      <div class="hero">
+        <div class="hero-label">总盈亏（已实现 + 浮动）</div>
+        <div class="hero-value" id="k-total">—</div>
+        <div class="hero-sub" id="k-total-pct">—</div>
+      </div>
+
+      <div class="kpi-grid">
+        <div class="kpi">
+          <div class="kpi-label">持仓市值</div>
+          <div class="kpi-value" id="k-mv">—</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">持仓成本</div>
+          <div class="kpi-value" id="k-cost">—</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">浮动盈亏</div>
+          <div class="kpi-value" id="k-unreal">—</div>
+          <div class="kpi-sub" id="k-unreal-pct"></div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">已实现盈亏</div>
+          <div class="kpi-value" id="k-real">—</div>
+          <div class="kpi-sub" id="k-real-sub"></div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">累计投入</div>
+          <div class="kpi-value" id="k-buyin">—</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">累计费用</div>
+          <div class="kpi-value" id="k-fees">—</div>
+        </div>
+      </div>
+
+      <p class="notice" id="quote-warning" hidden></p>
+
+      <h2 class="section-title">持仓分布</h2>
+      <div id="allocation" class="allocation"></div>
+
+      <h2 class="section-title">已清仓</h2>
+      <div id="closed-list" class="list"></div>
+    </section>
+
+    <!-- 持仓 -->
+    <section class="panel" data-panel="holdings">
+      <p class="hint">填入现价即可算出市值和浮动盈亏，改完自动保存。这是你自己的账本，别人看不到。</p>
+      <div id="holdings-list" class="list"></div>
+    </section>
+
+    <!-- 流水 -->
+    <section class="panel" data-panel="trades">
+      <div class="filter-row">
+        <input id="trade-filter" class="filter" placeholder="按代码或名称筛选…" autocapitalize="off">
+      </div>
+      <div id="trades-list" class="list"></div>
+    </section>
+  </main>
+
+  <button class="fab" id="add-trade" aria-label="新增交易">＋</button>
+</div>
+
+<!-- ── 新增 / 编辑交易 ────────────────────────────────── -->
+<div class="sheet-backdrop" id="sheet" hidden>
+  <form class="sheet" id="trade-form">
+    <div class="sheet-head">
+      <button type="button" class="btn ghost small" id="sheet-cancel">取消</button>
+      <strong id="sheet-title">新增交易</strong>
+      <button type="submit" class="btn primary small" id="sheet-save">保存</button>
+    </div>
+
+    <div class="side-toggle">
+      <label><input type="radio" name="side" value="BUY" checked><span class="buy">买入</span></label>
+      <label><input type="radio" name="side" value="SELL"><span class="sell">卖出</span></label>
+    </div>
+
+    <div class="field-grid">
+      <label class="span2"><span class="lbl">股票代码 <span class="opt">代码或名称都行</span></span>
+        <input name="symbol" id="f-symbol" list="symbol-options" placeholder="如 00700、小米、中车" required
+               autocapitalize="off" autocorrect="off" autocomplete="off">
+        <datalist id="symbol-options"></datalist>
+        <small class="field-hint" id="symbol-hint"></small>
+      </label>
+      <label class="span2"><span class="lbl">名称 <span class="opt">选填</span></span>
+        <input name="name" id="f-name" placeholder="如 腾讯控股">
+      </label>
+      <label class="span2"><span class="lbl">交易日期</span>
+        <input name="trade_date" id="f-date" type="date" required>
+      </label>
+      <label><span class="lbl">单价 (HKD)</span>
+        <input name="price" id="f-price" type="number" step="0.001" min="0" inputmode="decimal" required>
+      </label>
+      <label><span class="lbl">数量 (股)</span>
+        <input name="qty" id="f-qty" type="number" step="1" min="0" inputmode="decimal" required>
+      </label>
+      <label class="span2"><span class="lbl">费用合计 <span class="opt">佣金+印花税等，选填</span></span>
+        <input name="fee" id="f-fee" type="number" step="0.01" min="0" inputmode="decimal" placeholder="0">
+      </label>
+      <label class="span2"><span class="lbl">备注 <span class="opt">选填</span></span>
+        <input name="note" id="f-note" maxlength="200">
+      </label>
+    </div>
+
+    <div class="total-preview" id="total-preview">总价 —</div>
+    <p class="error" id="form-error" hidden></p>
+    <button type="button" class="btn danger block" id="sheet-delete" hidden>删除这条记录</button>
+  </form>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script type="module">
+/* ── 记账核心（和真实部署同一份 public/accounting.js）────────────── */
+/**
+ * 港股买卖记录 · 记账核心
+ *
+ * 这个文件同时被 Worker（服务端校验）和浏览器（看板计算）import，
+ * 保证两边永远算出同一个数字。改这里就够了，不要复制第二份。
+ *
+ * 成本法：移动加权平均
+ *   买入  数量 += q      成本 += q*单价 + 费用      均价 = 成本/数量
+ *   卖出  结转成本 = 均价 * q
+ *         已实现盈亏 += (q*单价 - 费用) - 结转成本
+ *         数量 -= q      成本 -= 结转成本           均价不变
+ */
+
+const EPS = 1e-9;
+
+/** 港股代码归一化：700 / 0700 / 00700.HK / hk00700 → 00700 */
+function normalizeSymbol(raw) {
+  const s = String(raw ?? '').trim().toUpperCase();
+  if (!s) return '';
+  const digits = s.replace(/\.HK$/, '').replace(/^HK/, '');
+  if (/^\d{1,5}$/.test(digits)) return digits.padStart(5, '0');
+  return s;
+}
+
+/** 一笔交易的现金流向：买入为负（付出），卖出为正（收到） */
+function tradeAmount(trade) {
+  const gross = num(trade.qty) * num(trade.price);
+  const fee = num(trade.fee);
+  return trade.side === 'BUY' ? -(gross + fee) : gross - fee;
+}
+
+/** 一笔交易的成交金额（不含费用），即用户说的「总价」 */
+function tradeGross(trade) {
+  return num(trade.qty) * num(trade.price);
+}
+
+/** 按时间排序：先按交易日，同日按录入顺序（id） */
+function sortTrades(trades) {
+  return [...trades].sort((a, b) => {
+    if (a.trade_date !== b.trade_date) return a.trade_date < b.trade_date ? -1 : 1;
+    return num(a.id) - num(b.id);
+  });
+}
+
+/**
+ * 校验时间线：任何一刻都不能卖出超过当时的持仓。
+ * @returns {null | {symbol: string, trade: object, held: number}} 没问题返回 null
+ */
+function findOversell(trades) {
+  for (const [symbol, list] of groupBySymbol(sortTrades(trades))) {
+    let qty = 0;
+    for (const t of list) {
+      const q = num(t.qty);
+      if (t.side === 'BUY') {
+        qty += q;
+      } else {
+        if (q > qty + EPS) return { symbol, trade: t, held: qty };
+        qty -= q;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * 汇总成看板需要的一切。
+ * @param trades 全部交易
+ * @param quotes { [symbol]: price } 手动维护的现价
+ */
+function buildPortfolio(trades, quotes = {}) {
+  const holdings = [];
+  const closed = [];
+
+  let totalBuyIn = 0;   // 累计投入（所有买入的金额+费用）
+  let totalFees = 0;
+
+  for (const t of trades) {
+    totalFees += num(t.fee);
+    if (t.side === 'BUY') totalBuyIn += tradeGross(t) + num(t.fee);
+  }
+
+  for (const [symbol, list] of groupBySymbol(sortTrades(trades))) {
+    let qty = 0;
+    let cost = 0;
+    let realized = 0;
+    let boughtQty = 0;
+    let soldQty = 0;
+    let name = '';
+    let lastDate = '';
+
+    for (const t of list) {
+      if (t.name) name = t.name;
+      lastDate = t.trade_date;
+      const q = num(t.qty);
+      const p = num(t.price);
+      const fee = num(t.fee);
+
+      if (t.side === 'BUY') {
+        qty += q;
+        cost += q * p + fee;
+        boughtQty += q;
+      } else {
+        const avg = qty > EPS ? cost / qty : 0;
+        const closedQty = Math.min(q, qty);
+        const costOut = avg * closedQty;
+        realized += (q * p - fee) - costOut;
+        qty -= q;
+        cost -= costOut;
+        soldQty += q;
+        if (qty <= EPS) { qty = 0; cost = 0; }
+      }
+    }
+
+    const avgCost = qty > EPS ? cost / qty : 0;
+    const rawQuote = quotes[symbol];
+    const hasQuote = rawQuote !== undefined && rawQuote !== null && rawQuote !== '';
+    const price = hasQuote ? num(rawQuote) : avgCost;   // 没填现价就按成本价估，浮盈显示为 0
+    const marketValue = qty * price;
+    const unrealized = marketValue - cost;
+
+    const row = {
+      symbol,
+      name: name || symbol,
+      qty,
+      avgCost,
+      costBasis: cost,
+      price,
+      hasQuote,
+      marketValue,
+      unrealizedPnl: unrealized,
+      unrealizedPct: cost > EPS ? unrealized / cost : 0,
+      realizedPnl: realized,
+      totalPnl: realized + unrealized,
+      boughtQty,
+      soldQty,
+      lastDate,
+      tradeCount: list.length,
+    };
+
+    if (qty > EPS) holdings.push(row); else closed.push(row);
+  }
+
+  holdings.sort((a, b) => b.marketValue - a.marketValue);
+  closed.sort((a, b) => (a.lastDate < b.lastDate ? 1 : -1));
+
+  const costBasis = sum(holdings, (h) => h.costBasis);
+  const marketValue = sum(holdings, (h) => h.marketValue);
+  const unrealizedPnl = marketValue - costBasis;
+  const realizedPnl = sum(holdings, (h) => h.realizedPnl) + sum(closed, (c) => c.realizedPnl);
+  const totalPnl = realizedPnl + unrealizedPnl;
+
+  return {
+    holdings,
+    closed,
+    totals: {
+      costBasis,
+      marketValue,
+      unrealizedPnl,
+      unrealizedPct: costBasis > EPS ? unrealizedPnl / costBasis : 0,
+      realizedPnl,
+      totalPnl,
+      totalPct: totalBuyIn > EPS ? totalPnl / totalBuyIn : 0,
+      totalBuyIn,
+      totalFees,
+      holdingCount: holdings.length,
+      closedCount: closed.length,
+      tradeCount: trades.length,
+      // 没填现价的持仓：市值口径不准，界面上要提示
+      missingQuotes: holdings.filter((h) => !h.hasQuote).map((h) => h.symbol),
+    },
+  };
+}
+
+function groupBySymbol(trades) {
+  const map = new Map();
+  for (const t of trades) {
+    const key = t.symbol;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(t);
+  }
+  return map;
+}
+
+function sum(list, pick) {
+  let total = 0;
+  for (const item of list) total += pick(item);
+  return total;
+}
+
+function num(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/* ── 常用港股速查表（同 public/stocks.js）───────────────────────── */
+/**
+ * 常用港股速查表。
+ *
+ * 目的只有一个：少记代码。在「股票代码」框里打「小米」也能带出 01810，
+ * 名称跟着自动填好。表里没有的照样能手打代码，不受影响。
+ *
+ * 要加新的就照抄一行：
+ *   symbol  5 位补零的港股代码
+ *   name    默认名称（录入时随时能改，改了以这笔为准）
+ *   aliases 你顺手会打的简称，中英文都行，小写即可
+ *
+ * ⚠️ 加之前先核对代码，填错了这只股票的所有记录都会算到别人头上。
+ */
+const COMMON_STOCKS = [
+  { symbol: '00700', name: '腾讯控股',     aliases: ['腾讯', 'tencent'] },
+  { symbol: '09988', name: '阿里巴巴-W',   aliases: ['阿里', '阿里巴巴', 'alibaba', 'baba'] },
+  { symbol: '03690', name: '美团-W',       aliases: ['美团', 'meituan'] },
+  { symbol: '09618', name: '京东集团-SW',  aliases: ['京东', 'jd'] },
+  { symbol: '09888', name: '百度集团-SW',  aliases: ['百度', 'baidu'] },
+  { symbol: '01810', name: '小米集团-W',   aliases: ['小米', 'xiaomi'] },
+  { symbol: '03896', name: '金山云',       aliases: ['金山', 'kingsoft cloud', 'ksyun'] },
+  // 2026-04-01 由「小鹏汽车-W」更名为「小鹏集团-W」，代码不变
+  { symbol: '09868', name: '小鹏集团-W',   aliases: ['小鹏', '小鹏汽车', 'xpeng'] },
+  { symbol: '01766', name: '中国中车',     aliases: ['中车', 'crrc'] },
+];
+
+const BY_SYMBOL = new Map(COMMON_STOCKS.map((s) => [s.symbol, s]));
+
+/** 代码对应的常用名称，表里没有就返回 '' */
+function commonName(symbol) {
+  return BY_SYMBOL.get(symbol)?.name ?? '';
+}
+
+/**
+ * 按输入找股票：先当代码认，认不出再按名称/简称匹配。
+ * @returns {{symbol: string, name: string} | null}
+ */
+function findStock(input) {
+  const raw = String(input ?? '').trim();
+  if (!raw) return null;
+
+  // 纯数字（或 00700.HK 这种）直接当代码
+  const asCode = raw.toUpperCase().replace(/\.HK$/, '').replace(/^HK/, '');
+  if (/^\d{1,5}$/.test(asCode)) {
+    const padded = asCode.padStart(5, '0');
+    return BY_SYMBOL.get(padded) ?? { symbol: padded, name: '' };
+  }
+
+  const q = raw.toLowerCase();
+  const hit =
+    COMMON_STOCKS.find((s) => s.name.toLowerCase() === q || s.aliases.some((a) => a === q)) ??
+    COMMON_STOCKS.find((s) => s.name.toLowerCase().startsWith(q) || s.aliases.some((a) => a.startsWith(q))) ??
+    COMMON_STOCKS.find((s) => s.name.toLowerCase().includes(q) || s.aliases.some((a) => a.includes(q)));
+
+  return hit ? { symbol: hit.symbol, name: hit.name } : null;
+}
+
+/* ── 假后端：拦 fetch，数据存 localStorage ──────────────────────── */
+
+const DEMO_KEY = 'stocks-record-demo-v1';
+const DEMO_USER = { id: 1, username: 'demo', name: '演示账号' };
+
+const SEED = {
+  "trades": [
+    {
+      "note": "",
+      "created_at": "2026-03-12 10:00:00",
+      "id": 1,
+      "symbol": "00700",
+      "name": "腾讯控股",
+      "side": "BUY",
+      "trade_date": "2026-03-12",
+      "price": 372.4,
+      "qty": 100,
+      "fee": 62
+    },
+    {
+      "note": "",
+      "created_at": "2026-04-02 10:00:00",
+      "id": 2,
+      "symbol": "09618",
+      "name": "京东集团-SW",
+      "side": "BUY",
+      "trade_date": "2026-04-02",
+      "price": 131.5,
+      "qty": 400,
+      "fee": 58
+    },
+    {
+      "note": "",
+      "created_at": "2026-05-08 10:00:00",
+      "id": 3,
+      "symbol": "00700",
+      "name": "腾讯控股",
+      "side": "BUY",
+      "trade_date": "2026-05-08",
+      "price": 405,
+      "qty": 100,
+      "fee": 68
+    },
+    {
+      "note": "",
+      "created_at": "2026-05-20 10:00:00",
+      "id": 4,
+      "symbol": "09988",
+      "name": "阿里巴巴-W",
+      "side": "BUY",
+      "trade_date": "2026-05-20",
+      "price": 112.8,
+      "qty": 500,
+      "fee": 55
+    },
+    {
+      "note": "止损清仓",
+      "created_at": "2026-06-18 10:00:00",
+      "id": 5,
+      "symbol": "09618",
+      "name": "京东集团-SW",
+      "side": "SELL",
+      "trade_date": "2026-06-18",
+      "price": 122.4,
+      "qty": 400,
+      "fee": 71
+    },
+    {
+      "note": "减半仓",
+      "created_at": "2026-07-24 10:00:00",
+      "id": 6,
+      "symbol": "00700",
+      "name": "腾讯控股",
+      "side": "SELL",
+      "trade_date": "2026-07-24",
+      "price": 468.6,
+      "qty": 100,
+      "fee": 79
+    },
+    {
+      "note": "",
+      "created_at": "2026-08-11 10:00:00",
+      "id": 7,
+      "symbol": "09888",
+      "name": "百度集团-SW",
+      "side": "BUY",
+      "trade_date": "2026-08-11",
+      "price": 88.5,
+      "qty": 600,
+      "fee": 46
+    }
+  ],
+  "quotes": {
+    "00700": 502.5,
+    "09988": 106.2,
+    "09888": 95.4
+  },
+  "quoteAt": {
+    "00700": "2026-09-03 09:30:00",
+    "09988": "2026-09-03 09:30:00",
+    "09888": "2026-09-03 09:30:00"
+  }
+};
+
+function loadDemo() {
+  try {
+    const raw = localStorage.getItem(DEMO_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return structuredClone(SEED);
+}
+
+function saveDemo(d) {
+  try { localStorage.setItem(DEMO_KEY, JSON.stringify(d)); } catch {}
+}
+
+let demo = loadDemo();
+
+document.querySelector('#demo-reset').addEventListener('click', () => {
+  demo = structuredClone(SEED);
+  saveDemo(demo);
+  location.reload();
+});
+
+/** 和服务端 readTrade 同样的校验 —— 演示页也不该收下脏数据 */
+function demoReadTrade(b) {
+  const symbol = findStock(b.symbol)?.symbol || normalizeSymbol(b.symbol);
+  if (!symbol) throw { status: 400, error: '请填写股票代码' };
+  if (!/^\d{5}$/.test(symbol))
+    throw { status: 400, error: `「${String(b.symbol ?? '').trim()}」不是有效的港股代码，请填数字代码（如 00700）` };
+
+  const side = String(b.side || '').toUpperCase();
+  if (side !== 'BUY' && side !== 'SELL') throw { status: 400, error: '方向只能是买入或卖出' };
+
+  const trade_date = String(b.trade_date || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trade_date)) throw { status: 400, error: '交易日期格式应为 YYYY-MM-DD' };
+
+  const price = Number(b.price);
+  if (!Number.isFinite(price) || price < 0) throw { status: 400, error: '单价要是一个 ≥ 0 的数字' };
+
+  const qty = Number(b.qty);
+  if (!Number.isFinite(qty) || qty <= 0) throw { status: 400, error: '数量要大于 0' };
+
+  const fee = b.fee === '' || b.fee == null ? 0 : Number(b.fee);
+  if (!Number.isFinite(fee) || fee < 0) throw { status: 400, error: '费用要是一个 ≥ 0 的数字' };
+
+  return {
+    symbol,
+    name: String(b.name || '').trim().slice(0, 60),
+    side, trade_date, price, qty, fee,
+    note: String(b.note || '').trim().slice(0, 200),
+  };
+}
+
+function demoResolveName(input) {
+  if (!input.name) {
+    const prev = [...demo.trades].reverse().find((t) => t.symbol === input.symbol && t.name);
+    return prev?.name || commonName(input.symbol);
+  }
+  for (const t of demo.trades) if (t.symbol === input.symbol && !t.name) t.name = input.name;
+  return input.name;
+}
+
+function demoOversell(symbol, candidate, excludeId) {
+  const others = demo.trades.filter((t) => t.symbol === symbol && t.id !== excludeId);
+  const bad = findOversell([...others, candidate]);
+  if (bad) {
+    const q = Number(bad.trade.qty).toLocaleString('en-US', { maximumFractionDigits: 4 });
+    const h = Number(bad.held).toLocaleString('en-US', { maximumFractionDigits: 4 });
+    throw { status: 400, error: `${bad.symbol} 在 ${bad.trade.trade_date} 卖出 ${q} 股，但那时只持有 ${h} 股。请先补上对应的买入记录。` };
+  }
+}
+
+const realFetch = window.fetch.bind(window);
+
+window.fetch = async (input, init = {}) => {
+  const url = String(input);
+  if (!url.includes('/api/')) return realFetch(input, init);
+
+  const path = url.slice(url.indexOf('/api/') + 4);
+  const method = (init.method || 'GET').toUpperCase();
+  const body = init.body ? JSON.parse(init.body) : {};
+  const json = (data, status = 200) =>
+    new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
+
+  try {
+    if (path === '/me') return json({ user: DEMO_USER });
+
+    if (path === '/state') {
+      const trades = [...demo.trades].sort((a, b) =>
+        a.trade_date === b.trade_date ? b.id - a.id : (a.trade_date < b.trade_date ? 1 : -1));
+      return json({
+        trades,
+        quotes: demo.quotes,
+        quoteMeta: Object.entries(demo.quotes).map(([symbol, price]) => ({
+          symbol, price, updated_at: demo.quoteAt[symbol] || '',
+        })),
+      });
+    }
+
+    if (path === '/trades' && method === 'POST') {
+      const input = demoReadTrade(body);
+      input.name = demoResolveName(input);
+      const id = Math.max(0, ...demo.trades.map((t) => t.id)) + 1;
+      demoOversell(input.symbol, { ...input, id: Number.MAX_SAFE_INTEGER });
+      demo.trades.push({ ...input, id, created_at: new Date().toISOString().slice(0, 19).replace('T', ' ') });
+      saveDemo(demo);
+      return json({ id }, 201);
+    }
+
+    const m = path.match(/^\/trades\/(\d+)$/);
+    if (m) {
+      const id = Number(m[1]);
+      const i = demo.trades.findIndex((t) => t.id === id);
+      if (i < 0) return json({ error: '这条记录已经不在了' }, 404);
+
+      if (method === 'PUT') {
+        const input = demoReadTrade(body);
+        input.name = demoResolveName(input);
+        demoOversell(input.symbol, { ...input, id }, id);
+        demo.trades[i] = { ...demo.trades[i], ...input };
+        saveDemo(demo);
+        return json({ ok: true });
+      }
+      if (method === 'DELETE') {
+        const symbol = demo.trades[i].symbol;
+        const rest = demo.trades.filter((t) => t.id !== id);
+        const bad = findOversell(rest.filter((t) => t.symbol === symbol));
+        if (bad) {
+          const q = Number(bad.trade.qty).toLocaleString('en-US', { maximumFractionDigits: 4 });
+          const h = Number(bad.held).toLocaleString('en-US', { maximumFractionDigits: 4 });
+          return json({ error: `${bad.symbol} 在 ${bad.trade.trade_date} 卖出 ${q} 股，但那时只持有 ${h} 股。请先补上对应的买入记录。` }, 400);
+        }
+        demo.trades = rest;
+        saveDemo(demo);
+        return json({ ok: true });
+      }
+    }
+
+    const q = path.match(/^\/quotes\/([^/]+)$/);
+    if (q && method === 'PUT') {
+      const symbol = normalizeSymbol(decodeURIComponent(q[1]));
+      const price = Number(body.price);
+      if (!Number.isFinite(price) || price < 0) return json({ error: '现价要是一个 ≥ 0 的数字' }, 400);
+      demo.quotes[symbol] = price;
+      demo.quoteAt[symbol] = new Date().toISOString().slice(0, 19).replace('T', ' ');
+      saveDemo(demo);
+      return json({ ok: true, symbol, price });
+    }
+
+    return json({ error: '接口不存在' }, 404);
+  } catch (e) {
+    if (e && e.status) return json({ error: e.error }, e.status);
+    throw e;
+  }
+};
+
+
+/* ── 前端（同 public/app.js）───────────────────────────────────── */
+const $ = (sel) => document.querySelector(sel);
+const el = {
+  app: $('#app'),
+  who: $('#who'),
+  sheet: $('#sheet'),
+  form: $('#trade-form'),
+  formError: $('#form-error'),
+  sheetTitle: $('#sheet-title'),
+  sheetSave: $('#sheet-save'),
+  sheetDelete: $('#sheet-delete'),
+  totalPreview: $('#total-preview'),
+  toast: $('#toast'),
+  filter: $('#trade-filter'),
+};
+
+const state = {
+  user: null,
+  trades: [],
+  quotes: {},
+  quoteMeta: {},
+  editingId: null,
+  filter: '',
+};
+
+/* ---------------------------------------------------------------- 启动 */
+
+boot();
+
+/**
+ * 应用自己不做登录 —— 走到这一步说明前面的反向代理已经问过 IdP 并放行了。
+ * /api/me 只是把代理注入的身份读回来显示在顶栏。
+ */
+async function boot() {
+  const logout = $('#logout');
+  // 服务端没注入 LOGOUT_URL 时占位符原样留着，那就别显示这个按钮
+  const logoutUrl = logout?.getAttribute('href') || '';
+  const hasLogout = logoutUrl && !logoutUrl.startsWith('__');
+  if (logout) logout.hidden = !hasLogout;
+
+  try {
+    const { user } = await api('GET', '/api/me');
+    state.user = user;
+    el.app.hidden = false;
+    el.who.textContent = user.name;
+    await refresh();
+  } catch (err) {
+    document.body.innerHTML =
+      `<div class="empty" style="margin:80px 20px">${esc(err.message)}` +
+      (hasLogout ? `<br><br><a href="${esc(logoutUrl)}">去登录</a>` : '') +
+      '</div>';
+  }
+}
+
+async function refresh() {
+  const data = await api('GET', '/api/state');
+  state.trades = data.trades;
+  state.names = null; // 下次 nameOf 时重建
+  state.quotes = data.quotes;
+  state.quoteMeta = Object.fromEntries((data.quoteMeta || []).map((q) => [q.symbol, q.updated_at]));
+  render();
+}
+
+/* ---------------------------------------------------------------- 渲染 */
+
+function render() {
+  const p = buildPortfolio(state.trades, state.quotes);
+  renderBoard(p);
+  renderHoldings(p);
+  renderTrades();
+  renderSymbolOptions();
+}
+
+function renderBoard({ holdings, closed, totals }) {
+  setSigned('#k-total', totals.totalPnl, { hero: true });
+  $('#k-total-pct').textContent = totals.tradeCount ? signedPct(totals.totalPct) + '   ·   累计投入回报' : '还没有记录';
+  $('#k-total-pct').className = 'hero-sub ' + toneOf(totals.totalPnl);
+
+  $('#k-mv').textContent = money(totals.marketValue);
+  $('#k-cost').textContent = money(totals.costBasis);
+
+  setSigned('#k-unreal', totals.unrealizedPnl);
+  $('#k-unreal-pct').textContent = totals.costBasis > 0 ? signedPct(totals.unrealizedPct) : '';
+
+  setSigned('#k-real', totals.realizedPnl);
+  $('#k-real-sub').textContent = closed.length ? `${closed.length} 只已清仓` : '';
+
+  $('#k-buyin').textContent = money(totals.totalBuyIn);
+  $('#k-fees').textContent = money(totals.totalFees);
+
+  const warn = $('#quote-warning');
+  if (totals.missingQuotes.length) {
+    warn.hidden = false;
+    warn.textContent =
+      `${totals.missingQuotes.join('、')} 还没填现价，暂时按成本价计入市值（浮盈算作 0）。到「持仓」页填一下就准了。`;
+  } else {
+    warn.hidden = true;
+  }
+
+  // 持仓分布
+  const alloc = $('#allocation');
+  if (!holdings.length) {
+    alloc.innerHTML = emptyBox('还没有持仓');
+  } else {
+    const max = Math.max(...holdings.map((h) => h.marketValue), 1);
+    alloc.innerHTML = holdings
+      .map((h) => {
+        const share = totals.marketValue > 0 ? h.marketValue / totals.marketValue : 0;
+        return `<div class="alloc-row">
+          <div class="alloc-head">
+            <span>${esc(h.name)} <span class="muted">${esc(h.symbol)}</span></span>
+            <span class="num">${money(h.marketValue)} <span class="muted">${pct(share)}</span></span>
+          </div>
+          <div class="alloc-bar"><div class="alloc-fill" style="width:${(h.marketValue / max) * 100}%"></div></div>
+        </div>`;
+      })
+      .join('');
+  }
+
+  // 已清仓
+  const closedBox = $('#closed-list');
+  closedBox.innerHTML = closed.length
+    ? closed
+        .map(
+          (c) => `<div class="card">
+            <div class="card-head">
+              <div class="sym">${esc(c.name)}<span class="code">${esc(c.symbol)}</span></div>
+              <div class="row-figure ${toneOf(c.realizedPnl)}">${signed(c.realizedPnl)}</div>
+            </div>
+            <div class="row-sub">买入 ${qty(c.boughtQty)} 股 · 卖出 ${qty(c.soldQty)} 股 · 最后成交 ${c.lastDate}</div>
+          </div>`
+        )
+        .join('')
+    : emptyBox('还没有完全卖出的股票');
+}
+
+function renderHoldings({ holdings }) {
+  const box = $('#holdings-list');
+  if (!holdings.length) {
+    box.innerHTML = emptyBox('还没有持仓，点右下角 ＋ 记一笔买入');
+    return;
+  }
+
+  box.innerHTML = holdings
+    .map(
+      (h) => `<div class="card">
+        <div class="card-head">
+          <div class="sym">${esc(h.name)}<span class="code">${esc(h.symbol)}</span></div>
+          <div>
+            <div class="row-figure ${toneOf(h.unrealizedPnl)}">${signed(h.unrealizedPnl)}</div>
+            <div class="row-sub ${toneOf(h.unrealizedPnl)}" style="text-align:right">${h.hasQuote ? signedPct(h.unrealizedPct) : '待填现价'}</div>
+          </div>
+        </div>
+        <dl class="stat-row">
+          <div class="stat"><dt>持有 (股)</dt><dd>${qty(h.qty)}</dd></div>
+          <div class="stat"><dt>均价</dt><dd>${plain(h.avgCost, 3)}</dd></div>
+          <div class="stat"><dt>成本</dt><dd>${plain(h.costBasis)}</dd></div>
+          <div class="stat"><dt>市值</dt><dd>${plain(h.marketValue)}</dd></div>
+        </dl>
+        ${h.realizedPnl !== 0 ? `<div class="row-sub" style="margin-top:8px">这只已实现盈亏 <span class="${toneOf(h.realizedPnl)}">${signed(h.realizedPnl)}</span></div>` : ''}
+        <div class="pos-price">
+          <span>当前价</span>
+          <input type="number" step="0.001" min="0" inputmode="decimal"
+                 data-quote="${esc(h.symbol)}" value="${h.hasQuote ? h.price : ''}" placeholder="填入现价">
+          <span class="stamp muted">${state.quoteMeta[h.symbol] ? '更新于 ' + shortTime(state.quoteMeta[h.symbol]) : ''}</span>
+        </div>
+      </div>`
+    )
+    .join('');
+}
+
+function renderTrades() {
+  const box = $('#trades-list');
+  const q = state.filter.trim().toLowerCase();
+  const list = q
+    ? state.trades.filter((t) => t.symbol.toLowerCase().includes(q) || nameOf(t.symbol).toLowerCase().includes(q))
+    : state.trades;
+
+  if (!list.length) {
+    box.innerHTML = emptyBox(q ? '没有匹配的记录' : '还没有交易记录');
+    return;
+  }
+
+  let html = '';
+  let lastDate = null;
+  for (const t of list) {
+    if (t.trade_date !== lastDate) {
+      lastDate = t.trade_date;
+      html += `<div class="trade-day">${t.trade_date}</div>`;
+    }
+    const buy = t.side === 'BUY';
+    const gross = tradeGross(t);
+    const net = buy ? gross + Number(t.fee) : gross - Number(t.fee);
+    html += `<button class="trade" data-trade="${t.id}">
+      <span class="pill ${buy ? 'buy' : 'sell'}">${buy ? '买' : '卖'}</span>
+      <span class="trade-main">
+        <span class="line1"><strong>${esc(nameOf(t.symbol))}</strong>${nameOf(t.symbol) === t.symbol ? '' : `<span class="muted">${esc(t.symbol)}</span>`}</span>
+        <span class="line2">${plain(t.price, 3)} × ${qty(t.qty)} 股${Number(t.fee) ? ' · 费用 ' + plain(t.fee) : ''}${t.note ? ' · ' + esc(t.note) : ''}</span>
+      </span>
+      <span class="trade-right">
+        <span class="amount ${buy ? 'up' : 'down'}">${buy ? '−' : '+'}${money(Math.abs(net))}</span>
+      </span>
+    </button>`;
+  }
+  box.innerHTML = html;
+}
+
+/**
+ * 下拉候选 = 交易过的 + 常用表。
+ *
+ * option 的 value 写成「01810 小米集团-W」而不是纯代码：浏览器只按 value 过滤，
+ * 名称不放进 value 的话，打「小米」就什么都匹配不到。选中后由
+ * resolveSymbolField 再把它还原成纯代码。
+ */
+function renderSymbolOptions() {
+  const seen = new Map();
+  for (const t of state.trades) seen.set(t.symbol, nameOf(t.symbol));
+  for (const s of COMMON_STOCKS) if (!seen.has(s.symbol)) seen.set(s.symbol, s.name);
+
+  $('#symbol-options').innerHTML = [...seen]
+    .map(([sym, name]) => `<option value="${esc(name && name !== sym ? sym + ' ' + name : sym)}"></option>`)
+    .join('');
+}
+
+/** 某只股票的名称：交易记录里填过的优先，其次常用表，都没有就退回代码 */
+function nameOf(symbol) {
+  if (!state.names) {
+    state.names = new Map();
+    for (const t of state.trades) if (t.name && !state.names.has(t.symbol)) state.names.set(t.symbol, t.name);
+  }
+  return state.names.get(symbol) || commonName(symbol) || symbol;
+}
+
+/**
+ * 把代码框里的东西解析成 { symbol, name }。接受三种写法：
+ *   「01810 小米集团-W」 从下拉里选的
+ *   「小米」/「xpeng」   常用表里的名称或简称
+ *   「700」/「00700.HK」 直接打代码
+ */
+function parseSymbolInput(raw) {
+  const s = String(raw ?? '').trim();
+  if (!s) return null;
+
+  // 下拉选中的那种，前面是代码后面是名称
+  const picked = s.match(/^(\d{1,5})\s+(.+)$/);
+  if (picked) return { symbol: normalizeSymbol(picked[1]), name: picked[2].trim(), known: true };
+
+  const hit = findStock(s);
+  if (hit && hit.name) return { ...hit, known: true };
+  if (hit) return { ...hit, name: nameOf(hit.symbol) === hit.symbol ? '' : nameOf(hit.symbol), known: true };
+
+  // 认不出来的当代码收着 —— 表里没有的股票照样能记
+  const symbol = normalizeSymbol(s);
+  const known = /^\d{5}$/.test(symbol);
+  return { symbol, name: known ? nameOf(symbol).replace(symbol, '') : '', known };
+}
+
+/** 代码框失焦/选中后：还原成纯代码、补名称、给一行确认提示 */
+function resolveSymbolField() {
+  const input = $('#f-symbol');
+  const hint = $('#symbol-hint');
+  const parsed = parseSymbolInput(input.value);
+
+  if (!parsed) {
+    hint.textContent = '';
+    hint.className = 'field-hint';
+    return;
+  }
+
+  input.value = parsed.symbol;
+
+  const name = parsed.name || nameOf(parsed.symbol);
+  if (name && name !== parsed.symbol && !$('#f-name').value.trim()) $('#f-name').value = name;
+
+  if (!parsed.known) {
+    hint.textContent = '没认出来 —— 请改填数字代码，或把它加进常用表';
+    hint.className = 'field-hint bad';
+  } else if (name && name !== parsed.symbol) {
+    hint.textContent = `${parsed.symbol}　${name}`;
+    hint.className = 'field-hint ok';
+  } else {
+    hint.textContent = parsed.symbol;
+    hint.className = 'field-hint ok';
+  }
+
+  updateTotalPreview();
+}
+
+/* ------------------------------------------------------------ 交互绑定 */
+
+document.querySelectorAll('.tab').forEach((tab) => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t === tab));
+    document.querySelectorAll('.panel').forEach((p) => {
+      p.classList.toggle('active', p.dataset.panel === tab.dataset.tab);
+    });
+    window.scrollTo({ top: 0 });
+  });
+});
+
+el.filter.addEventListener('input', () => {
+  state.filter = el.filter.value;
+  renderTrades();
+});
+
+// 现价：停止输入 500ms 后自动保存
+const quoteTimers = new Map();
+$('#holdings-list').addEventListener('input', (e) => {
+  const input = e.target.closest('[data-quote]');
+  if (!input) return;
+  const symbol = input.dataset.quote;
+  clearTimeout(quoteTimers.get(symbol));
+  quoteTimers.set(
+    symbol,
+    setTimeout(async () => {
+      const raw = input.value.trim();
+      if (raw === '') return;
+      try {
+        await api('PUT', `/api/quotes/${encodeURIComponent(symbol)}`, { price: Number(raw) });
+        state.quotes[symbol] = Number(raw);
+        state.quoteMeta[symbol] = new Date().toISOString().slice(0, 19).replace('T', ' ');
+        const p = buildPortfolio(state.trades, state.quotes);
+        renderBoard(p);
+        updateHoldingCard(symbol, p);
+      } catch (err) {
+        toast(err.message, true);
+      }
+    }, 500)
+  );
+});
+
+/** 只刷新一张持仓卡的数字，避免把用户正在打字的输入框重建掉 */
+function updateHoldingCard(symbol, portfolio) {
+  const h = portfolio.holdings.find((x) => x.symbol === symbol);
+  const input = document.querySelector(`[data-quote="${CSS.escape(symbol)}"]`);
+  if (!h || !input) return;
+  const card = input.closest('.card');
+  card.querySelector('.row-figure').className = 'row-figure ' + toneOf(h.unrealizedPnl);
+  card.querySelector('.row-figure').textContent = signed(h.unrealizedPnl);
+  const sub = card.querySelector('.card-head .row-sub');
+  sub.className = 'row-sub ' + toneOf(h.unrealizedPnl);
+  sub.style.textAlign = 'right';
+  sub.textContent = h.hasQuote ? signedPct(h.unrealizedPct) : '待填现价';
+  card.querySelectorAll('.stat dd')[3].textContent = plain(h.marketValue);
+  card.querySelector('.stamp').textContent = '刚刚更新';
+}
+
+$('#trades-list').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-trade]');
+  if (btn) openSheet(state.trades.find((t) => String(t.id) === btn.dataset.trade));
+});
+
+$('#add-trade').addEventListener('click', () => openSheet(null));
+$('#sheet-cancel').addEventListener('click', closeSheet);
+el.sheet.addEventListener('click', (e) => {
+  if (e.target === el.sheet) closeSheet();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !el.sheet.hidden) closeSheet();
+});
+
+el.form.addEventListener('input', updateTotalPreview);
+el.form.addEventListener('change', updateTotalPreview);
+
+// change 覆盖「从下拉里选」和「打完移开焦点」两种情况
+$('#f-symbol').addEventListener('change', resolveSymbolField);
+$('#f-symbol').addEventListener('blur', resolveSymbolField);
+
+el.form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  el.formError.hidden = true;
+  el.sheetSave.disabled = true;
+
+  // 有可能没触发过 blur 就直接点了保存（比如键盘回车），这里兜一次
+  resolveSymbolField();
+
+  const body = {
+    symbol: $('#f-symbol').value,
+    name: $('#f-name').value,
+    side: el.form.side.value,
+    trade_date: $('#f-date').value,
+    price: $('#f-price').value,
+    qty: $('#f-qty').value,
+    fee: $('#f-fee').value,
+    note: $('#f-note').value,
+  };
+
+  try {
+    if (state.editingId) {
+      await api('PUT', `/api/trades/${state.editingId}`, body);
+      toast('已保存');
+    } else {
+      await api('POST', '/api/trades', body);
+      toast('已记录');
+    }
+    closeSheet();
+    await refresh();
+  } catch (err) {
+    el.formError.textContent = err.message;
+    el.formError.hidden = false;
+  } finally {
+    el.sheetSave.disabled = false;
+  }
+});
+
+el.sheetDelete.addEventListener('click', async () => {
+  if (!state.editingId) return;
+  if (!confirm('删除这条交易记录？删掉之后盈亏会重新计算。')) return;
+  el.sheetDelete.disabled = true;
+  try {
+    await api('DELETE', `/api/trades/${state.editingId}`);
+    closeSheet();
+    await refresh();
+    toast('已删除');
+  } catch (err) {
+    el.formError.textContent = err.message;
+    el.formError.hidden = false;
+  } finally {
+    el.sheetDelete.disabled = false;
+  }
+});
+
+/* ---------------------------------------------------------------- 表单 */
+
+function openSheet(trade) {
+  el.form.reset();
+  el.formError.hidden = true;
+  state.editingId = trade ? trade.id : null;
+
+  if (trade) {
+    el.sheetTitle.textContent = '编辑交易';
+    el.sheetDelete.hidden = false;
+    el.form.side.value = trade.side;
+    $('#f-symbol').value = trade.symbol;
+    $('#f-name').value = trade.name || '';
+    $('#f-date').value = trade.trade_date;
+    $('#f-price').value = trade.price;
+    $('#f-qty').value = trade.qty;
+    $('#f-fee').value = Number(trade.fee) || '';
+    $('#f-note').value = trade.note || '';
+  } else {
+    el.sheetTitle.textContent = '新增交易';
+    el.sheetDelete.hidden = true;
+    el.form.side.value = 'BUY';
+    $('#f-date').value = todayHK();
+  }
+
+  $('#symbol-hint').textContent = '';
+  $('#symbol-hint').className = 'field-hint';
+  if (trade) resolveSymbolField();
+
+  updateTotalPreview();
+  el.sheet.hidden = false;
+  document.body.style.overflow = 'hidden';
+  if (!trade) setTimeout(() => $('#f-symbol').focus(), 60);
+}
+
+function closeSheet() {
+  el.sheet.hidden = true;
+  state.editingId = null;
+  document.body.style.overflow = '';
+}
+
+function updateTotalPreview() {
+  const price = Number($('#f-price').value);
+  const q = Number($('#f-qty').value);
+  const fee = Number($('#f-fee').value) || 0;
+  const buy = el.form.side.value === 'BUY';
+
+  if (!Number.isFinite(price) || !Number.isFinite(q) || price <= 0 || q <= 0) {
+    el.totalPreview.innerHTML = '填好单价和数量后，这里会显示总价';
+    return;
+  }
+
+  const gross = price * q;
+  const net = buy ? gross + fee : gross - fee;
+  el.totalPreview.innerHTML =
+    `总价 <strong>${money(gross)}</strong>` +
+    (fee ? `　·　${buy ? '实付' : '实收'} <strong>${money(net)}</strong>（含费用 ${plain(fee)}）` : '');
+
+  // 卖出时提示一下这笔大概能实现多少盈亏
+  if (!buy) {
+    const symbol = parseSymbolInput($('#f-symbol').value)?.symbol ?? '';
+    const before = state.trades.filter((t) => t.symbol === symbol && t.id !== state.editingId);
+    if (before.length) {
+      const pos = buildPortfolio(before, {}).holdings.find((h) => h.symbol === symbol);
+      if (pos && pos.qty > 0) {
+        const realized = net - pos.avgCost * Math.min(q, pos.qty);
+        el.totalPreview.innerHTML +=
+          `<div class="row-sub" style="margin-top:6px">当前持有 ${qty(pos.qty)} 股，均价 ${plain(pos.avgCost, 3)}` +
+          `　→　这笔实现盈亏约 <span class="${toneOf(realized)}">${signed(realized)}</span></div>`;
+      }
+    }
+  }
+}
+
+/* ---------------------------------------------------------------- 工具 */
+
+async function api(method, path, body) {
+  const res = await fetch(path, {
+    method,
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  // 会话过期时 Caddy 会把请求 302 到 Authelia；fetch 拿到的会是登录页而不是 401。
+  // 真收到 401 说明 Remote-User 头没进来 —— 刷新一次让浏览器走完整跳转。
+  if (res.status === 401) {
+    location.reload();
+    throw new Error('登录已过期，正在重新登录…');
+  }
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `请求失败（${res.status}）`);
+  return data;
+}
+
+let toastTimer;
+function toast(message, bad = false) {
+  el.toast.textContent = message;
+  el.toast.className = 'toast' + (bad ? ' bad' : '');
+  el.toast.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (el.toast.hidden = true), bad ? 5000 : 2000);
+}
+
+function setSigned(sel, value, { hero = false } = {}) {
+  const node = $(sel);
+  node.textContent = signed(value);
+  node.className = (hero ? 'hero-value ' : 'kpi-value ') + toneOf(value);
+}
+
+function toneOf(v) {
+  if (v > 0.005) return 'up';
+  if (v < -0.005) return 'down';
+  return 'flat';
+}
+
+function money(v) {
+  return 'HK$' + plain(v);
+}
+
+function plain(v, digits = 2) {
+  return Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
+
+function signed(v) {
+  const sign = v > 0.005 ? '+' : v < -0.005 ? '−' : '';
+  return sign + 'HK$' + plain(Math.abs(v));
+}
+
+function signedPct(v) {
+  const sign = v > 0 ? '+' : v < 0 ? '−' : '';
+  return sign + pct(Math.abs(v));
+}
+
+function pct(v) {
+  return (v * 100).toFixed(2) + '%';
+}
+
+function qty(v) {
+  return Number(v || 0).toLocaleString('en-US', { maximumFractionDigits: 4 });
+}
+
+/** 港股交易日按香港时区取，避免半夜录入记成第二天 */
+function todayHK() {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Hong_Kong' }).format(new Date());
+}
+
+function shortTime(iso) {
+  return String(iso).replace('T', ' ').slice(5, 16);
+}
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function emptyBox(text) {
+  return `<div class="empty">${esc(text)}</div>`;
+}
+</script>
+</body>
+</html>

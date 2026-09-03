@@ -1,0 +1,20 @@
+{
+  "name": "stocks-record",
+  "version": "1.0.0",
+  "private": true,
+  "description": "港股买卖流水与盈亏看板。零依赖，Node 内置模块 + SQLite。",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node server/app.js",
+    "build:demo": "node scripts/build-demo.mjs",
+    "build:icons": "node scripts/make-icons.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ma-wenqian/stocks-record.git"
+  }
+}
