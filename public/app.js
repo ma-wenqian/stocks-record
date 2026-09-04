@@ -24,6 +24,8 @@ const state = {
   trades: [],
   quotes: {},
   quoteMeta: {},
+  // { [交易 id]: 'open' | 'close' }，由 buildPortfolio 算出，流水页据此打标
+  marks: {},
   // 成本口径。存在服务端跟着人走，所以手机和电脑看到的成本价是同一个
   costMode: DEFAULT_COST_MODE,
   editingId: null,
@@ -73,6 +75,7 @@ async function refresh() {
 
 function render() {
   const p = buildPortfolio(state.trades, state.quotes, state.costMode);
+  state.marks = p.marks;   // renderTrades 也会被筛选框单独调用，所以存下来
   renderCostMode();
   renderBoard(p);
   renderHoldings(p);
@@ -159,7 +162,7 @@ function renderBoard({ holdings, closed, totals }) {
               <div class="sym">${esc(c.name)}<span class="code">${esc(c.symbol)}</span></div>
               <div class="row-figure ${toneOf(c.realizedPnl)}">${signed(c.realizedPnl)}</div>
             </div>
-            <div class="row-sub">买入 ${qty(c.boughtQty)} 股 · 卖出 ${qty(c.soldQty)} 股 · 最后成交 ${c.lastDate}</div>
+            <div class="row-sub">买入 ${qty(c.boughtQty)} 股 · 卖出 ${qty(c.soldQty)} 股${c.roundIndex > 1 ? ` · 共 ${c.roundIndex} 轮` : ''} · 清仓 ${c.lastDate}</div>
           </div>`
         )
         .join('')
@@ -189,7 +192,7 @@ function renderHoldings({ holdings }) {
           <div class="stat"><dt>成本</dt><dd>${plain(h.costBasis)}</dd></div>
           <div class="stat"><dt>市值</dt><dd>${plain(h.marketValue)}</dd></div>
         </dl>
-        ${realizedLine(h)}
+        ${cardFooter(h)}
         <div class="pos-price">
           <span>当前价</span>
           <input type="number" step="0.001" min="0" inputmode="decimal"
@@ -209,16 +212,33 @@ function pctLine(h) {
   return signedPct(h.unrealizedPct);
 }
 
-/** 持仓卡底部那行「这只已实现盈亏」 */
-function realizedLine(h) {
-  // 摊薄口径下它是 0，但这个 0 的含义是「摊进成本了」，不是「没赚过」
-  if (h.realizedFolded) {
-    return '<div class="row-sub" style="margin-top:8px">这只已实现盈亏 <span class="muted">已摊入成本</span></div>';
+/**
+ * 持仓卡底部的说明区：建仓日 / 轮次 / 已实现盈亏。
+ * 合成一个块统一给间距 —— 行数是会变的，每条各带一个 margin 迟早对不齐。
+ */
+function cardFooter(h) {
+  const lines = [];
+
+  const meta = [];
+  if (h.openedAt) meta.push(`建仓 ${esc(h.openedAt)}`);
+  // 清仓过又买回来的才标轮次，第 1 轮说「第 1 轮」是废话
+  if (h.roundIndex > 1) meta.push(`第 ${h.roundIndex} 轮`);
+  if (meta.length) lines.push(meta.join('　·　'));
+
+  if (h.realizedFolded && h.realizedPnl !== 0) {
+    // 摊薄：本轮的摊进成本了，之前几轮的还实实在在赚着，要单独报
+    lines.push(
+      `前 ${h.roundIndex - 1} 轮已实现 <span class="${toneOf(h.realizedPnl)}">${signed(h.realizedPnl)}</span>` +
+      '　·　本轮已摊入成本'
+    );
+  } else if (h.realizedFolded) {
+    // 这个 0 的含义是「摊进成本了」，不是「没赚过」
+    lines.push('这只已实现盈亏 <span class="muted">已摊入成本</span>');
+  } else if (h.realizedPnl !== 0) {
+    lines.push(`这只已实现盈亏 <span class="${toneOf(h.realizedPnl)}">${signed(h.realizedPnl)}</span>`);
   }
-  if (h.realizedPnl !== 0) {
-    return `<div class="row-sub" style="margin-top:8px">这只已实现盈亏 <span class="${toneOf(h.realizedPnl)}">${signed(h.realizedPnl)}</span></div>`;
-  }
-  return '';
+
+  return lines.length ? `<div class="pos-meta">${lines.map((l) => `<div>${l}</div>`).join('')}</div>` : '';
 }
 
 function renderTrades() {
@@ -243,10 +263,13 @@ function renderTrades() {
     const buy = t.side === 'BUY';
     const gross = tradeGross(t);
     const net = buy ? gross + Number(t.fee) : gross - Number(t.fee);
+    // 建仓 = 持仓从 0 变成正数的那笔；清仓 = 把持仓打回 0 的那笔。
+    // 摊薄成本就是从建仓那天重新起算的，所以这两个点值得在流水里看得见。
+    const mark = state.marks[t.id];
     html += `<button class="trade" data-trade="${t.id}">
       <span class="pill ${buy ? 'buy' : 'sell'}">${buy ? '买' : '卖'}</span>
       <span class="trade-main">
-        <span class="line1"><strong>${esc(nameOf(t.symbol))}</strong>${nameOf(t.symbol) === t.symbol ? '' : `<span class="muted">${esc(t.symbol)}</span>`}</span>
+        <span class="line1"><strong>${esc(nameOf(t.symbol))}</strong>${nameOf(t.symbol) === t.symbol ? '' : `<span class="muted">${esc(t.symbol)}</span>`}${mark ? `<span class="round-tag ${mark}">${mark === 'open' ? '建仓' : '清仓'}</span>` : ''}</span>
         <span class="line2">${plain(t.price, 3)} × ${qty(t.qty)} 股${Number(t.fee) ? ' · 费用 ' + plain(t.fee) : ''}${t.note ? ' · ' + esc(t.note) : ''}</span>
       </span>
       <span class="trade-right">

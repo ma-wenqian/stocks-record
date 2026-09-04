@@ -322,6 +322,16 @@ main { max-width: 760px; margin: 0 auto; padding: 16px 16px 96px; }
   text-overflow: ellipsis;
 }
 
+/* 卡片底部说明区：建仓日 / 轮次 / 已实现盈亏。行数会变，间距统一给在这里 */
+.pos-meta {
+  margin-top: 10px;
+  display: grid;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .pos-price {
   margin-top: 12px;
   display: flex;
@@ -374,8 +384,27 @@ main { max-width: 760px; margin: 0 auto; padding: 16px 16px 96px; }
 }
 .pill.buy { background: var(--up); }
 .pill.sell { background: var(--down); }
+/* 建仓 / 清仓标。刻意用中性描边而不是红绿 ——
+   方向已经由左边的买/卖色块说过了，这里说的是「一轮持仓的起点和终点」，
+   再上一次红绿只会让人以为是同一件事的重复 */
+.round-tag {
+  flex: none;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.5;
+  padding: 0 5px;
+  border-radius: 5px;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.round-tag.close { color: var(--text); border-color: var(--muted); }
+
 .trade-main { flex: 1; min-width: 0; }
-.trade-main .line1 { display: flex; gap: 6px; align-items: baseline; }
+/* 名称整体不拆词：加了建仓/清仓标之后，长名字会被挤成「百度集团-」「SW」两截。
+   宁可整行换行，也不要把名字从中间劈开 */
+.trade-main .line1 { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+.trade-main .line1 > strong { white-space: nowrap; }
 .trade-main .line2 { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .trade-right { text-align: right; flex: none; }
 .amount { font-weight: 640; }

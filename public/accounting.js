@@ -13,13 +13,19 @@
  *           数量 -= q      成本 -= 结转成本           均价不变
  *
  *   diluted  摊薄成本 —— 摊薄成本价 / 保本价 (diluted, break-even cost basis)
- *     成本 = 累计买入金额 + 全部费用 - 累计卖出金额
+ *     成本 = 本轮买入金额 + 本轮全部费用 - 本轮卖出金额
  *     均价 = 成本 / 持仓数量       含义是「涨回这个价就回本」
- *     已实现盈亏整个摊进剩余持仓，所以持仓那一栏恒为 0
+ *     本轮的已实现盈亏摊进剩余持仓
+ *
+ * 「轮」是这里的核心概念：一轮 = 从建仓（持仓 0 → 正）到清仓（打回 0）。
+ * 清仓过一次，下次再买就是新的一轮，成本从头算 —— 上一轮赚的钱不该继续压低
+ * 这一轮的成本，否则一只翻倍卖飞过的票会永远显示「早就回本了」。
+ * avg 口径本来就是这个行为（清仓时 cost 归零），diluted 跟它对齐。
  *
  * ⚠️ 两种口径下**总盈亏必须完全相同** —— 换口径只是在挪已实现和浮动之间
  *    的那条线，不会凭空多赚或少赚。这是验算有没有写错最好用的一把尺子，
  *    动过这里之后一定要拿同一批交易复核一遍。
+ *    （摊薄下 realizedPnl 是**之前几轮**的合计，不是 0；本轮那部分才在成本里）
  *
  * ⚠️ 摊薄只对**还持有的**股票成立。已清仓的（qty=0）没有剩余持仓可摊，
  *    两种口径都照常报已实现盈亏 —— 否则那部分收益会凭空消失。
@@ -114,6 +120,8 @@ export function buildPortfolio(trades, quotes = {}, rawMode = DEFAULT_COST_MODE)
   const mode = normalizeCostMode(rawMode);
   const holdings = [];
   const closed = [];
+  // 流水页要标建仓/清仓 —— 顺路在这一趟里算出来，不另走一遍
+  const marks = {};
 
   let totalBuyIn = 0;   // 累计投入（所有买入的金额+费用）
   let totalFees = 0;
@@ -126,14 +134,21 @@ export function buildPortfolio(trades, quotes = {}, rawMode = DEFAULT_COST_MODE)
   for (const [symbol, list] of groupBySymbol(sortTrades(trades))) {
     let qty = 0;
     let cost = 0;
-    let realized = 0;
+    let realized = 0;    // 这只股票历来的已实现盈亏，所有轮次加起来
     let boughtQty = 0;
     let soldQty = 0;
-    let buyGross = 0;    // 累计买入金额，不含费用
-    let sellGross = 0;   // 累计卖出金额，不含费用
-    let fees = 0;        // 这只股票的全部费用，买卖都算
     let name = '';
     let lastDate = '';
+
+    // ── 轮次：一轮 = 从建仓（持仓 0 → 正）到清仓（打回 0）
+    let roundIndex = 0;      // 当前是第几轮，从 1 开始
+    let openedAt = '';       // 本轮的建仓日
+    let roundBuy = 0;        // 本轮买入金额，不含费用
+    let roundSell = 0;       // 本轮卖出金额，不含费用
+    let roundFees = 0;       // 本轮全部费用，买卖都算
+    let roundSold = 0;       // 本轮卖出股数
+    let roundRealized = 0;   // 本轮已实现盈亏
+    let priorRealized = 0;   // 之前已经清掉的那几轮，加起来
 
     for (const t of list) {
       if (t.name) name = t.name;
@@ -141,29 +156,51 @@ export function buildPortfolio(trades, quotes = {}, rawMode = DEFAULT_COST_MODE)
       const q = num(t.qty);
       const p = num(t.price);
       const fee = num(t.fee);
-      fees += fee;
 
       if (t.side === 'BUY') {
+        // 从空仓买进 = 新的一轮建仓，本轮的账全部从零开始
+        if (qty <= EPS) {
+          roundIndex += 1;
+          openedAt = t.trade_date;
+          roundBuy = 0;
+          roundSell = 0;
+          roundFees = 0;
+          roundSold = 0;
+          roundRealized = 0;
+          marks[t.id] = 'open';
+        }
         qty += q;
         cost += q * p + fee;
-        buyGross += q * p;
+        roundBuy += q * p;
+        roundFees += fee;
         boughtQty += q;
       } else {
         const avg = qty > EPS ? cost / qty : 0;
-        const closedQty = Math.min(q, qty);
-        const costOut = avg * closedQty;
-        realized += (q * p - fee) - costOut;
+        const costOut = avg * Math.min(q, qty);
+        const gain = (q * p - fee) - costOut;
+        realized += gain;
+        roundRealized += gain;
         qty -= q;
         cost -= costOut;
-        sellGross += q * p;
+        roundSell += q * p;
+        roundFees += fee;
+        roundSold += q;
         soldQty += q;
-        if (qty <= EPS) { qty = 0; cost = 0; }
+        if (qty <= EPS) {
+          qty = 0;
+          cost = 0;
+          marks[t.id] = 'close';
+          // 这一轮到此为止，收益归档 —— 下一轮的摊薄成本不能再把它算进去
+          priorRealized += roundRealized;
+          roundRealized = 0;
+        }
       }
     }
 
-    // 已清仓的不摊 —— 没有剩余持仓可摊，硬摊会把已实现盈亏算没了
+    // 摊薄只对还持有的股票成立，而且**只算本轮**：清仓过一次就重新起算。
+    // 已清仓的（qty=0）没有剩余持仓可摊，照常报已实现盈亏。
     const diluted = mode === 'diluted' && qty > EPS;
-    const costBasis = diluted ? buyGross + fees - sellGross : cost;
+    const costBasis = diluted ? roundBuy + roundFees - roundSell : cost;
     const avgCost = qty > EPS ? costBasis / qty : 0;
 
     // ⚠️ 没填现价时按「实际买入成本」估市值，两种口径共用这一个数。
@@ -189,12 +226,16 @@ export function buildPortfolio(trades, quotes = {}, rawMode = DEFAULT_COST_MODE)
       unrealizedPct: costBasis > EPS ? unrealized / costBasis : 0,
       // 摊薄成本已经 ≤ 0：本金全部收回，收益率没有分母可算
       costRecovered: diluted && costBasis <= EPS,
-      realizedPnl: diluted ? 0 : realized,
-      // 有过卖出、而且已实现盈亏被摊进了成本。界面上要说明，不能只显示个 0
-      realizedFolded: diluted && soldQty > EPS,
-      totalPnl: (diluted ? 0 : realized) + unrealized,
+      // 摊薄下只剩「之前几轮」的 —— 本轮那部分在成本里了
+      realizedPnl: diluted ? priorRealized : realized,
+      // 本轮有过卖出，它的已实现盈亏被摊进了成本。界面上要说明，不能只显示个 0
+      realizedFolded: diluted && roundSold > EPS,
+      totalPnl: (diluted ? priorRealized : realized) + unrealized,
       boughtQty,
       soldQty,
+      // 本轮建仓日与轮次。清仓过的股票再买回来就是第 2 轮，成本从那天重新算
+      openedAt,
+      roundIndex,
       lastDate,
       tradeCount: list.length,
     };
@@ -214,6 +255,8 @@ export function buildPortfolio(trades, quotes = {}, rawMode = DEFAULT_COST_MODE)
   return {
     holdings,
     closed,
+    // { [交易 id]: 'open' | 'close' } —— 流水页据此打建仓/清仓标
+    marks,
     totals: {
       mode,
       costBasis,
