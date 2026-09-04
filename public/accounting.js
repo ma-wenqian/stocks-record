@@ -1,17 +1,59 @@
 /**
  * 港股买卖记录 · 记账核心
  *
- * 这个文件同时被 Worker（服务端校验）和浏览器（看板计算）import，
+ * 这个文件同时被服务端（写入校验）和浏览器（看板计算）import，
  * 保证两边永远算出同一个数字。改这里就够了，不要复制第二份。
  *
- * 成本法：移动加权平均
- *   买入  数量 += q      成本 += q*单价 + 费用      均价 = 成本/数量
- *   卖出  结转成本 = 均价 * q
- *         已实现盈亏 += (q*单价 - 费用) - 结转成本
- *         数量 -= q      成本 -= 结转成本           均价不变
+ * 两种成本口径，由 buildPortfolio 的 mode 参数选，看板和持仓页共用同一个：
+ *
+ *   avg  持仓成本 —— 移动加权平均成本 (moving weighted average cost)
+ *     买入  数量 += q      成本 += q*单价 + 费用      均价 = 成本/数量
+ *     卖出  结转成本 = 均价 * q
+ *           已实现盈亏 += (q*单价 - 费用) - 结转成本
+ *           数量 -= q      成本 -= 结转成本           均价不变
+ *
+ *   diluted  摊薄成本 —— 摊薄成本价 / 保本价 (diluted, break-even cost basis)
+ *     成本 = 累计买入金额 + 全部费用 - 累计卖出金额
+ *     均价 = 成本 / 持仓数量       含义是「涨回这个价就回本」
+ *     已实现盈亏整个摊进剩余持仓，所以持仓那一栏恒为 0
+ *
+ * ⚠️ 两种口径下**总盈亏必须完全相同** —— 换口径只是在挪已实现和浮动之间
+ *    的那条线，不会凭空多赚或少赚。这是验算有没有写错最好用的一把尺子，
+ *    动过这里之后一定要拿同一批交易复核一遍。
+ *
+ * ⚠️ 摊薄只对**还持有的**股票成立。已清仓的（qty=0）没有剩余持仓可摊，
+ *    两种口径都照常报已实现盈亏 —— 否则那部分收益会凭空消失。
  */
 
 const EPS = 1e-9;
+
+/**
+ * 两种成本口径。⚠️ id 会存进数据库，不要改。
+ * label / alias / blurb 是界面文案，放在这里是因为它们描述的就是下面那套算法，
+ * 拆到 UI 层去写，算法改了文案不会跟着改。
+ */
+export const COST_MODES = {
+  avg: {
+    id: 'avg',
+    label: '持仓成本',
+    alias: '移动加权平均成本 · moving weighted average cost',
+    blurb: '买入费用计入成本，卖出费用从卖出收入里扣，卖出不改变剩余持仓的均价。会计准则、券商月结单和报税用的都是这个口径。',
+  },
+  diluted: {
+    id: 'diluted',
+    label: '摊薄成本',
+    alias: '摊薄成本价，也叫「保本价」「盈亏平衡成本」· diluted / break-even cost basis',
+    blurb: '已实现盈亏整个摊回剩余持仓，均价的含义变成「涨回这个价就回本」，所以卖出赚了钱它会被拉低。同花顺、东方财富、大智慧一类看盘软件的「成本价」设置项。',
+  },
+};
+
+export const DEFAULT_COST_MODE = 'avg';
+
+/** 认不出来的一律退回默认，不抛错 —— 这个值来自数据库和请求体，两边都可能是旧的 */
+export function normalizeCostMode(v) {
+  const s = String(v ?? '');
+  return Object.hasOwn(COST_MODES, s) ? s : DEFAULT_COST_MODE;
+}
 
 /** 港股代码归一化：700 / 0700 / 00700.HK / hk00700 → 00700 */
 export function normalizeSymbol(raw) {
@@ -66,8 +108,10 @@ export function findOversell(trades) {
  * 汇总成看板需要的一切。
  * @param trades 全部交易
  * @param quotes { [symbol]: price } 手动维护的现价
+ * @param rawMode 成本口径，见 COST_MODES；认不出来的退回 avg
  */
-export function buildPortfolio(trades, quotes = {}) {
+export function buildPortfolio(trades, quotes = {}, rawMode = DEFAULT_COST_MODE) {
+  const mode = normalizeCostMode(rawMode);
   const holdings = [];
   const closed = [];
 
@@ -85,6 +129,9 @@ export function buildPortfolio(trades, quotes = {}) {
     let realized = 0;
     let boughtQty = 0;
     let soldQty = 0;
+    let buyGross = 0;    // 累计买入金额，不含费用
+    let sellGross = 0;   // 累计卖出金额，不含费用
+    let fees = 0;        // 这只股票的全部费用，买卖都算
     let name = '';
     let lastDate = '';
 
@@ -94,10 +141,12 @@ export function buildPortfolio(trades, quotes = {}) {
       const q = num(t.qty);
       const p = num(t.price);
       const fee = num(t.fee);
+      fees += fee;
 
       if (t.side === 'BUY') {
         qty += q;
         cost += q * p + fee;
+        buyGross += q * p;
         boughtQty += q;
       } else {
         const avg = qty > EPS ? cost / qty : 0;
@@ -106,31 +155,44 @@ export function buildPortfolio(trades, quotes = {}) {
         realized += (q * p - fee) - costOut;
         qty -= q;
         cost -= costOut;
+        sellGross += q * p;
         soldQty += q;
         if (qty <= EPS) { qty = 0; cost = 0; }
       }
     }
 
-    const avgCost = qty > EPS ? cost / qty : 0;
+    // 已清仓的不摊 —— 没有剩余持仓可摊，硬摊会把已实现盈亏算没了
+    const diluted = mode === 'diluted' && qty > EPS;
+    const costBasis = diluted ? buyGross + fees - sellGross : cost;
+    const avgCost = qty > EPS ? costBasis / qty : 0;
+
+    // ⚠️ 没填现价时按「实际买入成本」估市值，两种口径共用这一个数。
+    //    这里要是跟着摊薄走，浮盈会算成 0，而摊薄模式下已实现本来也是 0 ——
+    //    那笔已经赚到的钱就凭空消失了。
+    const unitCost = qty > EPS ? cost / qty : 0;
     const rawQuote = quotes[symbol];
     const hasQuote = rawQuote !== undefined && rawQuote !== null && rawQuote !== '';
-    const price = hasQuote ? num(rawQuote) : avgCost;   // 没填现价就按成本价估，浮盈显示为 0
+    const price = hasQuote ? num(rawQuote) : unitCost;
     const marketValue = qty * price;
-    const unrealized = marketValue - cost;
+    const unrealized = marketValue - costBasis;
 
     const row = {
       symbol,
       name: name || symbol,
       qty,
       avgCost,
-      costBasis: cost,
+      costBasis,
       price,
       hasQuote,
       marketValue,
       unrealizedPnl: unrealized,
-      unrealizedPct: cost > EPS ? unrealized / cost : 0,
-      realizedPnl: realized,
-      totalPnl: realized + unrealized,
+      unrealizedPct: costBasis > EPS ? unrealized / costBasis : 0,
+      // 摊薄成本已经 ≤ 0：本金全部收回，收益率没有分母可算
+      costRecovered: diluted && costBasis <= EPS,
+      realizedPnl: diluted ? 0 : realized,
+      // 有过卖出、而且已实现盈亏被摊进了成本。界面上要说明，不能只显示个 0
+      realizedFolded: diluted && soldQty > EPS,
+      totalPnl: (diluted ? 0 : realized) + unrealized,
       boughtQty,
       soldQty,
       lastDate,
@@ -153,6 +215,7 @@ export function buildPortfolio(trades, quotes = {}) {
     holdings,
     closed,
     totals: {
+      mode,
       costBasis,
       marketValue,
       unrealizedPnl,
@@ -165,6 +228,9 @@ export function buildPortfolio(trades, quotes = {}) {
       holdingCount: holdings.length,
       closedCount: closed.length,
       tradeCount: trades.length,
+      // 摊薄模式下已实现盈亏被摊进成本的持仓数。看板上「已实现盈亏」那一栏
+      // 要据此说明，否则数字凭空变小、看起来像丢了记录
+      foldedCount: holdings.filter((h) => h.realizedFolded).length,
       // 没填现价的持仓：市值口径不准，界面上要提示
       missingQuotes: holdings.filter((h) => !h.hasQuote).map((h) => h.symbol),
     },

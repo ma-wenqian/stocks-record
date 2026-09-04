@@ -14,7 +14,7 @@ import { readFile } from 'node:fs/promises';
 import { join, extname, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { normalizeSymbol, findOversell } from '../public/accounting.js';
+import { normalizeSymbol, findOversell, COST_MODES, normalizeCostMode } from '../public/accounting.js';
 import { commonName, findStock } from '../public/stocks.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -68,6 +68,15 @@ function migrate() {
     }
   }
 
+  // 2026-09-05: 成本口径存到用户上，手机和电脑看到的成本价才是同一个。
+  // ⚠️ 纯加列 —— SQLite 的 ADD COLUMN 不重建表、不搬数据，
+  //    trades 和 quotes 一个字都不会动。默认 'avg' 就是原来的算法，
+  //    所以升级后所有人看到的数字和升级前完全一致。
+  if (!cols('users').includes('cost_mode')) {
+    console.log("migrate: users 增加 cost_mode 列，默认 'avg'（即原有口径）");
+    db.exec("ALTER TABLE users ADD COLUMN cost_mode TEXT NOT NULL DEFAULT 'avg'");
+  }
+
   // 旧索引没带 created_by，被 idx_trades_owner_* 取代了
   for (const idx of ['idx_trades_symbol_date', 'idx_trades_date']) {
     db.exec(`DROP INDEX IF EXISTS ${idx}`);
@@ -114,6 +123,7 @@ async function handleApi(req, res, url) {
 
   if (path === '/me' && req.method === 'GET') return send(res, 200, { user });
   if (path === '/state' && req.method === 'GET') return send(res, 200, getState(user));
+  if (path === '/settings' && req.method === 'PUT') return send(res, 200, updateSettings(await readJson(req), user));
   if (path === '/trades' && req.method === 'POST') return send(res, 201, createTrade(await readJson(req), user));
 
   const trade = path.match(/^\/trades\/(\d+)$/);
@@ -180,7 +190,25 @@ function getState(user) {
   const quotes = {};
   for (const q of quoteRows) quotes[q.symbol] = q.price;
 
-  return { trades, quotes, quoteMeta: quoteRows };
+  // 读的时候放宽：库里存着旧的或没见过的值就退回默认，不要让整页打不开
+  const me = db.prepare('SELECT cost_mode FROM users WHERE id = ?').get(user.id);
+
+  return { trades, quotes, quoteMeta: quoteRows, costMode: normalizeCostMode(me?.cost_mode) };
+}
+
+/**
+ * 目前只有成本口径一项。
+ * 写的时候从严：认不出就报错，让前端退回原来的选择并提示 ——
+ * 静默存成默认值的话，界面显示的和库里存的会对不上，下次打开又变回去。
+ */
+function updateSettings(body, user) {
+  const raw = String(body.costMode ?? '');
+  if (!Object.hasOwn(COST_MODES, raw)) {
+    throw new HttpError(400, `不认识的成本口径「${raw}」`);
+  }
+
+  db.prepare('UPDATE users SET cost_mode = ? WHERE id = ?').run(raw, user.id);
+  return { ok: true, costMode: raw };
 }
 
 function createTrade(body, user) {

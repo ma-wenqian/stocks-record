@@ -7,11 +7,7 @@ data/
 *.sqlite3-shm
 *.sqlite3-wal
 
-# Cloudflare Workers 本地状态（旧部署遗留）
-.wrangler/
-
 # 本地密钥
-.dev.vars
 .env
 
 *.log

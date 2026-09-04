@@ -21,10 +21,16 @@ const P = (p) => ROOT + p;
 const html = readFileSync(P('public/index.html'), 'utf8');
 const css = readFileSync(P('public/style.css'), 'utf8');
 
-/** 去掉 ESM 的 import/export，让几个模块能拼进同一个作用域 */
+/**
+ * 去掉 ESM 的 import/export，让几个模块能拼进同一个作用域。
+ *
+ * ⚠️ import 会跨行写（列多了就换行），所以这里必须用 [\s\S] 而不是 . ——
+ *    只认单行的话，换行的那条会原样留下来，和内联进来的同名函数撞车，
+ *    表现是**演示页整片白屏**而构建一声不吭。剥完由 assertStripped 兜底。
+ */
 function flatten(file) {
   return readFileSync(P('public/' + file), 'utf8')
-    .replace(/^import\s+.*?from\s+['"].*?['"];?\s*$/gm, '')
+    .replace(/^import\s[\s\S]*?from\s*['"][^'"]*['"];?[ \t]*$/gm, '')
     .replace(/^export\s+(?=(const|function|class|let|var)\b)/gm, '')
     .trim();
 }
@@ -36,6 +42,7 @@ const parts = {
 };
 
 // 拼在同一个作用域里，重名会静默覆盖 —— 宁可构建时炸掉
+assertStripped(parts);
 assertNoCollisions(parts);
 
 const body = html
@@ -54,7 +61,7 @@ const out = `<!doctype html>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="港股记录">
 <title>港股买卖记录 · 在线演示</title>
-<meta name="description" content="港股买卖流水与盈亏看板。移动加权平均成本法，演示数据存在你自己的浏览器里。">
+<meta name="description" content="港股买卖流水与盈亏看板。持仓成本 / 摊薄成本两种口径可切，演示数据存在你自己的浏览器里。">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <style>
@@ -214,7 +221,17 @@ window.fetch = async (input, init = {}) => {
         quoteMeta: Object.entries(demo.quotes).map(([symbol, price]) => ({
           symbol, price, updated_at: demo.quoteAt[symbol] || '',
         })),
+        costMode: normalizeCostMode(demo.costMode),
       });
+    }
+
+    // 和服务端一样：写的时候从严，认不出就报错
+    if (path === '/settings' && method === 'PUT') {
+      const raw = String(body.costMode ?? '');
+      if (!Object.hasOwn(COST_MODES, raw)) return json({ error: \`不认识的成本口径「\${raw}」\` }, 400);
+      demo.costMode = raw;
+      saveDemo(demo);
+      return json({ ok: true, costMode: raw });
     }
 
     if (path === '/trades' && method === 'POST') {
@@ -301,7 +318,20 @@ function seedData() {
     trades,
     quotes: { '00700': 502.5, '09988': 106.2, '09888': 95.4 },
     quoteAt: { '00700': at, '09988': at, '09888': at },
+    costMode: 'avg',
   };
+}
+
+/**
+ * 剥干净了没有。漏一条 import 就会和内联进来的同名函数撞成
+ * 「Identifier 'x' has already been declared」—— 整段 script 不执行、页面全白，
+ * 而构建本身照样成功。这个断言就是为了不让那种事再发生一次。
+ */
+function assertStripped(mods) {
+  for (const [name, src] of Object.entries(mods)) {
+    const bad = src.match(/^[ \t]*(?:import|export)\b.*/m);
+    if (bad) throw new Error(`${name}.js 里还留着没剥掉的模块语句：\n  ${bad[0].trim()}`);
+  }
 }
 
 /** 三个模块拼进同一个作用域，顶层重名会静默覆盖 —— 构建时就要发现 */

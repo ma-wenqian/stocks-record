@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="港股记录">
 <title>港股买卖记录 · 在线演示</title>
-<meta name="description" content="港股买卖流水与盈亏看板。移动加权平均成本法，演示数据存在你自己的浏览器里。">
+<meta name="description" content="港股买卖流水与盈亏看板。持仓成本 / 摊薄成本两种口径可切，演示数据存在你自己的浏览器里。">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <style>
@@ -250,6 +250,53 @@ main { max-width: 760px; margin: 0 auto; padding: 16px 16px 96px; }
 .alloc-head { display: flex; justify-content: space-between; font-size: 13px; }
 .alloc-bar { height: 7px; border-radius: 99px; background: var(--border); overflow: hidden; }
 .alloc-fill { height: 100%; border-radius: 99px; background: var(--accent); }
+
+/* ── 成本口径切换 ─────────────────────────────── */
+.costbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.costbar-label { font-size: 13px; color: var(--muted); }
+
+.seg {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.seg button {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 13px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background .12s, color .12s;
+}
+.seg button[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+.seg button:disabled { cursor: default; opacity: .6; }
+
+.cost-note {
+  margin-bottom: 14px;
+  padding-left: 12px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  display: grid;
+  gap: 3px;
+}
+.cost-alias { font-size: 12px; color: var(--muted); }
+.cost-blurb { margin: 0; font-size: 13px; color: var(--text); max-width: 60ch; }
 
 /* ── 列表卡片 ─────────────────────────────────── */
 .list { display: grid; gap: 10px; }
@@ -547,7 +594,9 @@ main { max-width: 760px; margin: 0 auto; padding: 16px 16px 96px; }
           <div class="kpi-value" id="k-mv">—</div>
         </div>
         <div class="kpi">
-          <div class="kpi-label">持仓成本</div>
+          <!-- 标签跟着成本口径变（持仓成本 / 摊薄成本）—— 不然换了口径
+               看板上的数字会莫名其妙地不一样，而这里没有任何交代 -->
+          <div class="kpi-label" id="k-cost-label">持仓成本</div>
           <div class="kpi-value" id="k-cost">—</div>
         </div>
         <div class="kpi">
@@ -581,6 +630,20 @@ main { max-width: 760px; margin: 0 auto; padding: 16px 16px 96px; }
 
     <!-- 持仓 -->
     <section class="panel" data-panel="holdings">
+      <!-- 成本口径。切换控件只放在这一页，但选择是全站生效的（看板也跟着变），
+           而且存在服务端 —— 手机和电脑看到的成本价必须是同一个。 -->
+      <div class="costbar">
+        <span class="costbar-label">成本口径</span>
+        <div class="seg" id="cost-mode" role="group" aria-label="成本口径">
+          <button type="button" data-mode="avg" aria-pressed="true">持仓成本</button>
+          <button type="button" data-mode="diluted" aria-pressed="false">摊薄成本</button>
+        </div>
+      </div>
+      <div class="cost-note">
+        <div class="cost-alias" id="cost-mode-alias"></div>
+        <p class="cost-blurb" id="cost-mode-blurb"></p>
+      </div>
+
       <p class="hint">填入现价即可算出市值和浮动盈亏，改完自动保存。这是你自己的账本，别人看不到。</p>
       <div id="holdings-list" class="list"></div>
     </section>
@@ -651,17 +714,59 @@ main { max-width: 760px; margin: 0 auto; padding: 16px 16px 96px; }
 /**
  * 港股买卖记录 · 记账核心
  *
- * 这个文件同时被 Worker（服务端校验）和浏览器（看板计算）import，
+ * 这个文件同时被服务端（写入校验）和浏览器（看板计算）import，
  * 保证两边永远算出同一个数字。改这里就够了，不要复制第二份。
  *
- * 成本法：移动加权平均
- *   买入  数量 += q      成本 += q*单价 + 费用      均价 = 成本/数量
- *   卖出  结转成本 = 均价 * q
- *         已实现盈亏 += (q*单价 - 费用) - 结转成本
- *         数量 -= q      成本 -= 结转成本           均价不变
+ * 两种成本口径，由 buildPortfolio 的 mode 参数选，看板和持仓页共用同一个：
+ *
+ *   avg  持仓成本 —— 移动加权平均成本 (moving weighted average cost)
+ *     买入  数量 += q      成本 += q*单价 + 费用      均价 = 成本/数量
+ *     卖出  结转成本 = 均价 * q
+ *           已实现盈亏 += (q*单价 - 费用) - 结转成本
+ *           数量 -= q      成本 -= 结转成本           均价不变
+ *
+ *   diluted  摊薄成本 —— 摊薄成本价 / 保本价 (diluted, break-even cost basis)
+ *     成本 = 累计买入金额 + 全部费用 - 累计卖出金额
+ *     均价 = 成本 / 持仓数量       含义是「涨回这个价就回本」
+ *     已实现盈亏整个摊进剩余持仓，所以持仓那一栏恒为 0
+ *
+ * ⚠️ 两种口径下**总盈亏必须完全相同** —— 换口径只是在挪已实现和浮动之间
+ *    的那条线，不会凭空多赚或少赚。这是验算有没有写错最好用的一把尺子，
+ *    动过这里之后一定要拿同一批交易复核一遍。
+ *
+ * ⚠️ 摊薄只对**还持有的**股票成立。已清仓的（qty=0）没有剩余持仓可摊，
+ *    两种口径都照常报已实现盈亏 —— 否则那部分收益会凭空消失。
  */
 
 const EPS = 1e-9;
+
+/**
+ * 两种成本口径。⚠️ id 会存进数据库，不要改。
+ * label / alias / blurb 是界面文案，放在这里是因为它们描述的就是下面那套算法，
+ * 拆到 UI 层去写，算法改了文案不会跟着改。
+ */
+const COST_MODES = {
+  avg: {
+    id: 'avg',
+    label: '持仓成本',
+    alias: '移动加权平均成本 · moving weighted average cost',
+    blurb: '买入费用计入成本，卖出费用从卖出收入里扣，卖出不改变剩余持仓的均价。会计准则、券商月结单和报税用的都是这个口径。',
+  },
+  diluted: {
+    id: 'diluted',
+    label: '摊薄成本',
+    alias: '摊薄成本价，也叫「保本价」「盈亏平衡成本」· diluted / break-even cost basis',
+    blurb: '已实现盈亏整个摊回剩余持仓，均价的含义变成「涨回这个价就回本」，所以卖出赚了钱它会被拉低。同花顺、东方财富、大智慧一类看盘软件的「成本价」设置项。',
+  },
+};
+
+const DEFAULT_COST_MODE = 'avg';
+
+/** 认不出来的一律退回默认，不抛错 —— 这个值来自数据库和请求体，两边都可能是旧的 */
+function normalizeCostMode(v) {
+  const s = String(v ?? '');
+  return Object.hasOwn(COST_MODES, s) ? s : DEFAULT_COST_MODE;
+}
 
 /** 港股代码归一化：700 / 0700 / 00700.HK / hk00700 → 00700 */
 function normalizeSymbol(raw) {
@@ -716,8 +821,10 @@ function findOversell(trades) {
  * 汇总成看板需要的一切。
  * @param trades 全部交易
  * @param quotes { [symbol]: price } 手动维护的现价
+ * @param rawMode 成本口径，见 COST_MODES；认不出来的退回 avg
  */
-function buildPortfolio(trades, quotes = {}) {
+function buildPortfolio(trades, quotes = {}, rawMode = DEFAULT_COST_MODE) {
+  const mode = normalizeCostMode(rawMode);
   const holdings = [];
   const closed = [];
 
@@ -735,6 +842,9 @@ function buildPortfolio(trades, quotes = {}) {
     let realized = 0;
     let boughtQty = 0;
     let soldQty = 0;
+    let buyGross = 0;    // 累计买入金额，不含费用
+    let sellGross = 0;   // 累计卖出金额，不含费用
+    let fees = 0;        // 这只股票的全部费用，买卖都算
     let name = '';
     let lastDate = '';
 
@@ -744,10 +854,12 @@ function buildPortfolio(trades, quotes = {}) {
       const q = num(t.qty);
       const p = num(t.price);
       const fee = num(t.fee);
+      fees += fee;
 
       if (t.side === 'BUY') {
         qty += q;
         cost += q * p + fee;
+        buyGross += q * p;
         boughtQty += q;
       } else {
         const avg = qty > EPS ? cost / qty : 0;
@@ -756,31 +868,44 @@ function buildPortfolio(trades, quotes = {}) {
         realized += (q * p - fee) - costOut;
         qty -= q;
         cost -= costOut;
+        sellGross += q * p;
         soldQty += q;
         if (qty <= EPS) { qty = 0; cost = 0; }
       }
     }
 
-    const avgCost = qty > EPS ? cost / qty : 0;
+    // 已清仓的不摊 —— 没有剩余持仓可摊，硬摊会把已实现盈亏算没了
+    const diluted = mode === 'diluted' && qty > EPS;
+    const costBasis = diluted ? buyGross + fees - sellGross : cost;
+    const avgCost = qty > EPS ? costBasis / qty : 0;
+
+    // ⚠️ 没填现价时按「实际买入成本」估市值，两种口径共用这一个数。
+    //    这里要是跟着摊薄走，浮盈会算成 0，而摊薄模式下已实现本来也是 0 ——
+    //    那笔已经赚到的钱就凭空消失了。
+    const unitCost = qty > EPS ? cost / qty : 0;
     const rawQuote = quotes[symbol];
     const hasQuote = rawQuote !== undefined && rawQuote !== null && rawQuote !== '';
-    const price = hasQuote ? num(rawQuote) : avgCost;   // 没填现价就按成本价估，浮盈显示为 0
+    const price = hasQuote ? num(rawQuote) : unitCost;
     const marketValue = qty * price;
-    const unrealized = marketValue - cost;
+    const unrealized = marketValue - costBasis;
 
     const row = {
       symbol,
       name: name || symbol,
       qty,
       avgCost,
-      costBasis: cost,
+      costBasis,
       price,
       hasQuote,
       marketValue,
       unrealizedPnl: unrealized,
-      unrealizedPct: cost > EPS ? unrealized / cost : 0,
-      realizedPnl: realized,
-      totalPnl: realized + unrealized,
+      unrealizedPct: costBasis > EPS ? unrealized / costBasis : 0,
+      // 摊薄成本已经 ≤ 0：本金全部收回，收益率没有分母可算
+      costRecovered: diluted && costBasis <= EPS,
+      realizedPnl: diluted ? 0 : realized,
+      // 有过卖出、而且已实现盈亏被摊进了成本。界面上要说明，不能只显示个 0
+      realizedFolded: diluted && soldQty > EPS,
+      totalPnl: (diluted ? 0 : realized) + unrealized,
       boughtQty,
       soldQty,
       lastDate,
@@ -803,6 +928,7 @@ function buildPortfolio(trades, quotes = {}) {
     holdings,
     closed,
     totals: {
+      mode,
       costBasis,
       marketValue,
       unrealizedPnl,
@@ -815,6 +941,9 @@ function buildPortfolio(trades, quotes = {}) {
       holdingCount: holdings.length,
       closedCount: closed.length,
       tradeCount: trades.length,
+      // 摊薄模式下已实现盈亏被摊进成本的持仓数。看板上「已实现盈亏」那一栏
+      // 要据此说明，否则数字凭空变小、看起来像丢了记录
+      foldedCount: holdings.filter((h) => h.realizedFolded).length,
       // 没填现价的持仓：市值口径不准，界面上要提示
       missingQuotes: holdings.filter((h) => !h.hasQuote).map((h) => h.symbol),
     },
@@ -1001,7 +1130,8 @@ const SEED = {
     "00700": "2026-09-03 09:30:00",
     "09988": "2026-09-03 09:30:00",
     "09888": "2026-09-03 09:30:00"
-  }
+  },
+  "costMode": "avg"
 };
 
 function loadDemo() {
@@ -1097,7 +1227,17 @@ window.fetch = async (input, init = {}) => {
         quoteMeta: Object.entries(demo.quotes).map(([symbol, price]) => ({
           symbol, price, updated_at: demo.quoteAt[symbol] || '',
         })),
+        costMode: normalizeCostMode(demo.costMode),
       });
+    }
+
+    // 和服务端一样：写的时候从严，认不出就报错
+    if (path === '/settings' && method === 'PUT') {
+      const raw = String(body.costMode ?? '');
+      if (!Object.hasOwn(COST_MODES, raw)) return json({ error: `不认识的成本口径「${raw}」` }, 400);
+      demo.costMode = raw;
+      saveDemo(demo);
+      return json({ ok: true, costMode: raw });
     }
 
     if (path === '/trades' && method === 'POST') {
@@ -1179,6 +1319,8 @@ const state = {
   trades: [],
   quotes: {},
   quoteMeta: {},
+  // 成本口径。存在服务端跟着人走，所以手机和电脑看到的成本价是同一个
+  costMode: DEFAULT_COST_MODE,
   editingId: null,
   filter: '',
 };
@@ -1218,17 +1360,29 @@ async function refresh() {
   state.names = null; // 下次 nameOf 时重建
   state.quotes = data.quotes;
   state.quoteMeta = Object.fromEntries((data.quoteMeta || []).map((q) => [q.symbol, q.updated_at]));
+  state.costMode = normalizeCostMode(data.costMode);
   render();
 }
 
 /* ---------------------------------------------------------------- 渲染 */
 
 function render() {
-  const p = buildPortfolio(state.trades, state.quotes);
+  const p = buildPortfolio(state.trades, state.quotes, state.costMode);
+  renderCostMode();
   renderBoard(p);
   renderHoldings(p);
   renderTrades();
   renderSymbolOptions();
+}
+
+/** 切换控件的选中态 + 底下那段说明。文案在 accounting.js 里，和算法放在一起 */
+function renderCostMode() {
+  const meta = COST_MODES[state.costMode] || COST_MODES[DEFAULT_COST_MODE];
+  document.querySelectorAll('#cost-mode button').forEach((b) => {
+    b.setAttribute('aria-pressed', String(b.dataset.mode === meta.id));
+  });
+  $('#cost-mode-alias').textContent = meta.alias;
+  $('#cost-mode-blurb').textContent = meta.blurb;
 }
 
 function renderBoard({ holdings, closed, totals }) {
@@ -1238,12 +1392,25 @@ function renderBoard({ holdings, closed, totals }) {
 
   $('#k-mv').textContent = money(totals.marketValue);
   $('#k-cost').textContent = money(totals.costBasis);
+  $('#k-cost-label').textContent = (COST_MODES[totals.mode] || COST_MODES[DEFAULT_COST_MODE]).label;
 
   setSigned('#k-unreal', totals.unrealizedPnl);
-  $('#k-unreal-pct').textContent = totals.costBasis > 0 ? signedPct(totals.unrealizedPct) : '';
+  $('#k-unreal-pct').textContent = totals.costBasis > 0
+    ? signedPct(totals.unrealizedPct)
+    : (totals.holdingCount ? '成本已收回' : '');
 
-  setSigned('#k-real', totals.realizedPnl);
-  $('#k-real-sub').textContent = closed.length ? `${closed.length} 只已清仓` : '';
+  // 摊薄口径下，持仓那部分的已实现盈亏被摊进了成本。数字凭空变小很像丢了记录，
+  // 所以这里必须说清楚剩下的是什么 —— 而不是把这一栏藏起来。
+  if (totals.foldedCount && !closed.length) {
+    $('#k-real').textContent = '已摊入成本';
+    $('#k-real').className = 'kpi-value flat';
+    $('#k-real-sub').textContent = `${totals.foldedCount} 只持仓`;
+  } else {
+    setSigned('#k-real', totals.realizedPnl);
+    $('#k-real-sub').textContent = totals.foldedCount
+      ? `仅 ${closed.length} 只已清仓 · 持仓部分已摊入成本`
+      : (closed.length ? `${closed.length} 只已清仓` : '');
+  }
 
   $('#k-buyin').textContent = money(totals.totalBuyIn);
   $('#k-fees').textContent = money(totals.totalFees);
@@ -1308,7 +1475,7 @@ function renderHoldings({ holdings }) {
           <div class="sym">${esc(h.name)}<span class="code">${esc(h.symbol)}</span></div>
           <div>
             <div class="row-figure ${toneOf(h.unrealizedPnl)}">${signed(h.unrealizedPnl)}</div>
-            <div class="row-sub ${toneOf(h.unrealizedPnl)}" style="text-align:right">${h.hasQuote ? signedPct(h.unrealizedPct) : '待填现价'}</div>
+            <div class="row-sub ${toneOf(h.unrealizedPnl)}" style="text-align:right">${pctLine(h)}</div>
           </div>
         </div>
         <dl class="stat-row">
@@ -1317,7 +1484,7 @@ function renderHoldings({ holdings }) {
           <div class="stat"><dt>成本</dt><dd>${plain(h.costBasis)}</dd></div>
           <div class="stat"><dt>市值</dt><dd>${plain(h.marketValue)}</dd></div>
         </dl>
-        ${h.realizedPnl !== 0 ? `<div class="row-sub" style="margin-top:8px">这只已实现盈亏 <span class="${toneOf(h.realizedPnl)}">${signed(h.realizedPnl)}</span></div>` : ''}
+        ${realizedLine(h)}
         <div class="pos-price">
           <span>当前价</span>
           <input type="number" step="0.001" min="0" inputmode="decimal"
@@ -1327,6 +1494,26 @@ function renderHoldings({ holdings }) {
       </div>`
     )
     .join('');
+}
+
+/** 持仓卡右上角那行百分比 */
+function pctLine(h) {
+  if (!h.hasQuote) return '待填现价';
+  // 摊薄成本已经 ≤ 0：本金全部收回，收益率没有分母，硬报一个只会是天文数字
+  if (h.costRecovered) return '成本已收回';
+  return signedPct(h.unrealizedPct);
+}
+
+/** 持仓卡底部那行「这只已实现盈亏」 */
+function realizedLine(h) {
+  // 摊薄口径下它是 0，但这个 0 的含义是「摊进成本了」，不是「没赚过」
+  if (h.realizedFolded) {
+    return '<div class="row-sub" style="margin-top:8px">这只已实现盈亏 <span class="muted">已摊入成本</span></div>';
+  }
+  if (h.realizedPnl !== 0) {
+    return `<div class="row-sub" style="margin-top:8px">这只已实现盈亏 <span class="${toneOf(h.realizedPnl)}">${signed(h.realizedPnl)}</span></div>`;
+  }
+  return '';
 }
 
 function renderTrades() {
@@ -1479,7 +1666,7 @@ $('#holdings-list').addEventListener('input', (e) => {
         await api('PUT', `/api/quotes/${encodeURIComponent(symbol)}`, { price: Number(raw) });
         state.quotes[symbol] = Number(raw);
         state.quoteMeta[symbol] = new Date().toISOString().slice(0, 19).replace('T', ' ');
-        const p = buildPortfolio(state.trades, state.quotes);
+        const p = buildPortfolio(state.trades, state.quotes, state.costMode);
         renderBoard(p);
         updateHoldingCard(symbol, p);
       } catch (err) {
@@ -1500,10 +1687,29 @@ function updateHoldingCard(symbol, portfolio) {
   const sub = card.querySelector('.card-head .row-sub');
   sub.className = 'row-sub ' + toneOf(h.unrealizedPnl);
   sub.style.textAlign = 'right';
-  sub.textContent = h.hasQuote ? signedPct(h.unrealizedPct) : '待填现价';
+  sub.textContent = pctLine(h);
   card.querySelectorAll('.stat dd')[3].textContent = plain(h.marketValue);
   card.querySelector('.stamp').textContent = '刚刚更新';
 }
+
+// 成本口径：先切界面再存服务端，存不上就退回去
+$('#cost-mode').addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-mode]');
+  if (!btn || btn.dataset.mode === state.costMode) return;
+
+  const prev = state.costMode;
+  state.costMode = btn.dataset.mode;
+  render();
+
+  try {
+    await api('PUT', '/api/settings', { costMode: state.costMode });
+  } catch (err) {
+    // 留在切换后的样子会让人以为已经记住了，下次打开又变回去，更难查
+    state.costMode = prev;
+    render();
+    toast(err.message, true);
+  }
+});
 
 $('#trades-list').addEventListener('click', (e) => {
   const btn = e.target.closest('[data-trade]');
@@ -1643,6 +1849,8 @@ function updateTotalPreview() {
     const symbol = parseSymbolInput($('#f-symbol').value)?.symbol ?? '';
     const before = state.trades.filter((t) => t.symbol === symbol && t.id !== state.editingId);
     if (before.length) {
+      // ⚠️ 这里刻意不跟成本口径走。要预估的是这笔卖出实际落袋多少，
+      //    那取决于结转成本（移动加权平均），和看板显示哪个口径无关。
       const pos = buildPortfolio(before, {}).holdings.find((h) => h.symbol === symbol);
       if (pos && pos.qty > 0) {
         const realized = net - pos.avgCost * Math.min(q, pos.qty);

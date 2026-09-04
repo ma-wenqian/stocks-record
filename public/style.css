@@ -237,6 +237,53 @@ main { max-width: 760px; margin: 0 auto; padding: 16px 16px 96px; }
 .alloc-bar { height: 7px; border-radius: 99px; background: var(--border); overflow: hidden; }
 .alloc-fill { height: 100%; border-radius: 99px; background: var(--accent); }
 
+/* ── 成本口径切换 ─────────────────────────────── */
+.costbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.costbar-label { font-size: 13px; color: var(--muted); }
+
+.seg {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.seg button {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 13px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background .12s, color .12s;
+}
+.seg button[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+.seg button:disabled { cursor: default; opacity: .6; }
+
+.cost-note {
+  margin-bottom: 14px;
+  padding-left: 12px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  display: grid;
+  gap: 3px;
+}
+.cost-alias { font-size: 12px; color: var(--muted); }
+.cost-blurb { margin: 0; font-size: 13px; color: var(--text); max-width: 60ch; }
+
 /* ── 列表卡片 ─────────────────────────────────── */
 .list { display: grid; gap: 10px; }
 .card {

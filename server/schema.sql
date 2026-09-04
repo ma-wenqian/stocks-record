@@ -1,13 +1,14 @@
--- 港股买卖记录 · SQLite 表结构（hk 版）
+-- 港股买卖记录 · SQLite 表结构
 --
--- 和 Cloudflare D1 那版的唯一区别：users 表没有 password_hash。
--- 认证由 Authelia 做，这张表只是为了在流水里标出「谁记的」，
+-- users 表没有 password_hash：认证由 Authelia 做，
+-- 这张表只是为了在流水里标出「谁记的」，
 -- 第一次访问时由服务端自动登记。
 
 CREATE TABLE IF NOT EXISTS users (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   username     TEXT NOT NULL UNIQUE,          -- 来自 Remote-User
   display_name TEXT NOT NULL,                 -- 来自 Remote-Name
+  cost_mode    TEXT NOT NULL DEFAULT 'avg',   -- 成本口径，见 accounting.js 的 COST_MODES
   created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

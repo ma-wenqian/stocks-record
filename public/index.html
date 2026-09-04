@@ -55,7 +55,9 @@
           <div class="kpi-value" id="k-mv">—</div>
         </div>
         <div class="kpi">
-          <div class="kpi-label">持仓成本</div>
+          <!-- 标签跟着成本口径变（持仓成本 / 摊薄成本）—— 不然换了口径
+               看板上的数字会莫名其妙地不一样，而这里没有任何交代 -->
+          <div class="kpi-label" id="k-cost-label">持仓成本</div>
           <div class="kpi-value" id="k-cost">—</div>
         </div>
         <div class="kpi">
@@ -89,6 +91,20 @@
 
     <!-- 持仓 -->
     <section class="panel" data-panel="holdings">
+      <!-- 成本口径。切换控件只放在这一页，但选择是全站生效的（看板也跟着变），
+           而且存在服务端 —— 手机和电脑看到的成本价必须是同一个。 -->
+      <div class="costbar">
+        <span class="costbar-label">成本口径</span>
+        <div class="seg" id="cost-mode" role="group" aria-label="成本口径">
+          <button type="button" data-mode="avg" aria-pressed="true">持仓成本</button>
+          <button type="button" data-mode="diluted" aria-pressed="false">摊薄成本</button>
+        </div>
+      </div>
+      <div class="cost-note">
+        <div class="cost-alias" id="cost-mode-alias"></div>
+        <p class="cost-blurb" id="cost-mode-blurb"></p>
+      </div>
+
       <p class="hint">填入现价即可算出市值和浮动盈亏，改完自动保存。这是你自己的账本，别人看不到。</p>
       <div id="holdings-list" class="list"></div>
     </section>

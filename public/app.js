@@ -1,4 +1,7 @@
-import { buildPortfolio, normalizeSymbol, tradeGross } from './accounting.js';
+import {
+  buildPortfolio, normalizeSymbol, tradeGross,
+  COST_MODES, DEFAULT_COST_MODE, normalizeCostMode,
+} from './accounting.js';
 import { COMMON_STOCKS, findStock, commonName } from './stocks.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -21,6 +24,8 @@ const state = {
   trades: [],
   quotes: {},
   quoteMeta: {},
+  // 成本口径。存在服务端跟着人走，所以手机和电脑看到的成本价是同一个
+  costMode: DEFAULT_COST_MODE,
   editingId: null,
   filter: '',
 };
@@ -60,17 +65,29 @@ async function refresh() {
   state.names = null; // 下次 nameOf 时重建
   state.quotes = data.quotes;
   state.quoteMeta = Object.fromEntries((data.quoteMeta || []).map((q) => [q.symbol, q.updated_at]));
+  state.costMode = normalizeCostMode(data.costMode);
   render();
 }
 
 /* ---------------------------------------------------------------- 渲染 */
 
 function render() {
-  const p = buildPortfolio(state.trades, state.quotes);
+  const p = buildPortfolio(state.trades, state.quotes, state.costMode);
+  renderCostMode();
   renderBoard(p);
   renderHoldings(p);
   renderTrades();
   renderSymbolOptions();
+}
+
+/** 切换控件的选中态 + 底下那段说明。文案在 accounting.js 里，和算法放在一起 */
+function renderCostMode() {
+  const meta = COST_MODES[state.costMode] || COST_MODES[DEFAULT_COST_MODE];
+  document.querySelectorAll('#cost-mode button').forEach((b) => {
+    b.setAttribute('aria-pressed', String(b.dataset.mode === meta.id));
+  });
+  $('#cost-mode-alias').textContent = meta.alias;
+  $('#cost-mode-blurb').textContent = meta.blurb;
 }
 
 function renderBoard({ holdings, closed, totals }) {
@@ -80,12 +97,25 @@ function renderBoard({ holdings, closed, totals }) {
 
   $('#k-mv').textContent = money(totals.marketValue);
   $('#k-cost').textContent = money(totals.costBasis);
+  $('#k-cost-label').textContent = (COST_MODES[totals.mode] || COST_MODES[DEFAULT_COST_MODE]).label;
 
   setSigned('#k-unreal', totals.unrealizedPnl);
-  $('#k-unreal-pct').textContent = totals.costBasis > 0 ? signedPct(totals.unrealizedPct) : '';
+  $('#k-unreal-pct').textContent = totals.costBasis > 0
+    ? signedPct(totals.unrealizedPct)
+    : (totals.holdingCount ? '成本已收回' : '');
 
-  setSigned('#k-real', totals.realizedPnl);
-  $('#k-real-sub').textContent = closed.length ? `${closed.length} 只已清仓` : '';
+  // 摊薄口径下，持仓那部分的已实现盈亏被摊进了成本。数字凭空变小很像丢了记录，
+  // 所以这里必须说清楚剩下的是什么 —— 而不是把这一栏藏起来。
+  if (totals.foldedCount && !closed.length) {
+    $('#k-real').textContent = '已摊入成本';
+    $('#k-real').className = 'kpi-value flat';
+    $('#k-real-sub').textContent = `${totals.foldedCount} 只持仓`;
+  } else {
+    setSigned('#k-real', totals.realizedPnl);
+    $('#k-real-sub').textContent = totals.foldedCount
+      ? `仅 ${closed.length} 只已清仓 · 持仓部分已摊入成本`
+      : (closed.length ? `${closed.length} 只已清仓` : '');
+  }
 
   $('#k-buyin').textContent = money(totals.totalBuyIn);
   $('#k-fees').textContent = money(totals.totalFees);
@@ -150,7 +180,7 @@ function renderHoldings({ holdings }) {
           <div class="sym">${esc(h.name)}<span class="code">${esc(h.symbol)}</span></div>
           <div>
             <div class="row-figure ${toneOf(h.unrealizedPnl)}">${signed(h.unrealizedPnl)}</div>
-            <div class="row-sub ${toneOf(h.unrealizedPnl)}" style="text-align:right">${h.hasQuote ? signedPct(h.unrealizedPct) : '待填现价'}</div>
+            <div class="row-sub ${toneOf(h.unrealizedPnl)}" style="text-align:right">${pctLine(h)}</div>
           </div>
         </div>
         <dl class="stat-row">
@@ -159,7 +189,7 @@ function renderHoldings({ holdings }) {
           <div class="stat"><dt>成本</dt><dd>${plain(h.costBasis)}</dd></div>
           <div class="stat"><dt>市值</dt><dd>${plain(h.marketValue)}</dd></div>
         </dl>
-        ${h.realizedPnl !== 0 ? `<div class="row-sub" style="margin-top:8px">这只已实现盈亏 <span class="${toneOf(h.realizedPnl)}">${signed(h.realizedPnl)}</span></div>` : ''}
+        ${realizedLine(h)}
         <div class="pos-price">
           <span>当前价</span>
           <input type="number" step="0.001" min="0" inputmode="decimal"
@@ -169,6 +199,26 @@ function renderHoldings({ holdings }) {
       </div>`
     )
     .join('');
+}
+
+/** 持仓卡右上角那行百分比 */
+function pctLine(h) {
+  if (!h.hasQuote) return '待填现价';
+  // 摊薄成本已经 ≤ 0：本金全部收回，收益率没有分母，硬报一个只会是天文数字
+  if (h.costRecovered) return '成本已收回';
+  return signedPct(h.unrealizedPct);
+}
+
+/** 持仓卡底部那行「这只已实现盈亏」 */
+function realizedLine(h) {
+  // 摊薄口径下它是 0，但这个 0 的含义是「摊进成本了」，不是「没赚过」
+  if (h.realizedFolded) {
+    return '<div class="row-sub" style="margin-top:8px">这只已实现盈亏 <span class="muted">已摊入成本</span></div>';
+  }
+  if (h.realizedPnl !== 0) {
+    return `<div class="row-sub" style="margin-top:8px">这只已实现盈亏 <span class="${toneOf(h.realizedPnl)}">${signed(h.realizedPnl)}</span></div>`;
+  }
+  return '';
 }
 
 function renderTrades() {
@@ -321,7 +371,7 @@ $('#holdings-list').addEventListener('input', (e) => {
         await api('PUT', `/api/quotes/${encodeURIComponent(symbol)}`, { price: Number(raw) });
         state.quotes[symbol] = Number(raw);
         state.quoteMeta[symbol] = new Date().toISOString().slice(0, 19).replace('T', ' ');
-        const p = buildPortfolio(state.trades, state.quotes);
+        const p = buildPortfolio(state.trades, state.quotes, state.costMode);
         renderBoard(p);
         updateHoldingCard(symbol, p);
       } catch (err) {
@@ -342,10 +392,29 @@ function updateHoldingCard(symbol, portfolio) {
   const sub = card.querySelector('.card-head .row-sub');
   sub.className = 'row-sub ' + toneOf(h.unrealizedPnl);
   sub.style.textAlign = 'right';
-  sub.textContent = h.hasQuote ? signedPct(h.unrealizedPct) : '待填现价';
+  sub.textContent = pctLine(h);
   card.querySelectorAll('.stat dd')[3].textContent = plain(h.marketValue);
   card.querySelector('.stamp').textContent = '刚刚更新';
 }
+
+// 成本口径：先切界面再存服务端，存不上就退回去
+$('#cost-mode').addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-mode]');
+  if (!btn || btn.dataset.mode === state.costMode) return;
+
+  const prev = state.costMode;
+  state.costMode = btn.dataset.mode;
+  render();
+
+  try {
+    await api('PUT', '/api/settings', { costMode: state.costMode });
+  } catch (err) {
+    // 留在切换后的样子会让人以为已经记住了，下次打开又变回去，更难查
+    state.costMode = prev;
+    render();
+    toast(err.message, true);
+  }
+});
 
 $('#trades-list').addEventListener('click', (e) => {
   const btn = e.target.closest('[data-trade]');
@@ -485,6 +554,8 @@ function updateTotalPreview() {
     const symbol = parseSymbolInput($('#f-symbol').value)?.symbol ?? '';
     const before = state.trades.filter((t) => t.symbol === symbol && t.id !== state.editingId);
     if (before.length) {
+      // ⚠️ 这里刻意不跟成本口径走。要预估的是这笔卖出实际落袋多少，
+      //    那取决于结转成本（移动加权平均），和看板显示哪个口径无关。
       const pos = buildPortfolio(before, {}).holdings.find((h) => h.symbol === symbol);
       if (pos && pos.qty > 0) {
         const realized = net - pos.avgCost * Math.min(q, pos.qty);
